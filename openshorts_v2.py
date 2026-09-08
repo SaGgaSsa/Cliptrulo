@@ -13,7 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor" / "openshorts"))
 
 from openshorts_common import LANGUAGE, build_segments, stage
-from openshorts_v2lib import SEGMENT_PROMPT_TEMPLATE, SegmentResponse, resolve_section
+from openshorts_v2lib import HIGHLIGHT_PROMPT_TEMPLATE, HighlightResponse, SEGMENT_PROMPT_TEMPLATE, SegmentResponse, resolve_section
 from clip_selection import build_transcript_windows, snap_clip_to_words
 
 
@@ -46,6 +46,45 @@ def phase_segment(words, sec_a, sec_b):
     return {"sec_a": sec_a, "sec_b": sec_b, "items": items}
 
 
+def phase_highlight(words, items, n_clips=4):
+    scored = sorted([it for it in items if it["kind"] != "relleno"],
+                    key=lambda x: x.get("score", 0), reverse=True)[:n_clips]
+    flat = [{"w": w["word"], "s": w["start"], "e": w["end"]} for w in words]
+    montages = []
+    for rank, it in enumerate(scored, 1):
+        segments = build_segments(section_words(words, it["start"], it["end"]))
+        transcript = {"language": LANGUAGE, "segments": segments,
+                      "text": " ".join(w["word"] for w in section_words(words, it["start"], it["end"]))}
+        windows = build_transcript_windows(transcript, it["end"] - it["start"],
+                                           window_seconds=90, overlap_seconds=30)
+        payload = [{"id": w["id"], "start": w["start"], "end": w["end"], "text": w["text"]}
+                   for w in windows]
+        prompt = HIGHLIGHT_PROMPT_TEMPLATE.format(
+            item_a=round(it["start"], 3), item_b=round(it["end"], 3),
+            windows_json=json.dumps(payload, ensure_ascii=False))
+        parsed = stage(prompt, HighlightResponse, f"v2-highlight-{rank}")
+        spans = []
+        for sp in parsed.get("spans") or []:
+            ns, ne = snap_clip_to_words(sp["start"], sp["end"], flat, it["end"],
+                                        min_duration=2.0, max_duration=30.0)
+            spans.append({"start": ns, "end": ne, "role": sp["role"]})
+        spans.sort(key=lambda s: s["start"])
+        # Regla dura: total <= 60s. Recortar rol 'comentarios' primero (del final).
+        total = sum(s["end"] - s["start"] for s in spans)
+        while total > 60.0:
+            droppable = [s for s in reversed(spans) if s["role"] == "comentarios"]
+            pool = droppable or list(reversed(spans))
+            if len(spans) <= 1:
+                raise RuntimeError(f"clip {rank}: un solo span de {total:.1f}s > 60s")
+            spans.remove(pool[0])
+            total = sum(s["end"] - s["start"] for s in spans)
+        total = round(total, 3)
+        if total < 15.0:
+            print(f"  WARN clip {rank}: total {total:.1f}s < 15s, se extiende en montaje")
+        montages.append({"rank": rank, "item": it, "spans": spans, "total": total})
+    return {"montages": montages}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -55,6 +94,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--phase", default="all",
                     choices=["segment", "highlight", "montage", "all"])
+    ap.add_argument("--clips", type=int, default=4)
     args = ap.parse_args()
 
     words = json.loads(Path(args.words).read_text(encoding="utf-8"))
@@ -68,6 +108,14 @@ def main():
                                         encoding="utf-8")
         for it in seg["items"]:
             print(f"- [{it['start']:.0f}-{it['end']:.0f}] {it['kind']} score={it['score']} {it['summary'][:80]}")
+
+    if args.phase in ("highlight", "all"):
+        seg = json.loads((out / "items.json").read_text(encoding="utf-8"))
+        mon = phase_highlight(words, seg["items"], args.clips)
+        (out / "montages.json").write_text(json.dumps(mon, indent=2, ensure_ascii=False),
+                                           encoding="utf-8")
+        for m in mon["montages"]:
+            print(f"- clip {m['rank']}: total={m['total']:.1f}s spans={len(m['spans'])}")
 
 
 main()
