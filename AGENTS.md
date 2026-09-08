@@ -27,6 +27,7 @@ $py = ".\.venv\Scripts\python.exe"
 - `openshorts_v2.py` arma shorts por sección en 3 fases (`segment → highlight → montage`, `--phase all` o por fase). Salida `output\v2\<seccion>\`: `items.json`, `montages.json` (cada clip `total` ≤60s, spans con rol `presentacion`/`mejor_reaccion`/`comentarios`), `clip_NN_9x16.mp4`.
 - Criterio de spans v2 (vale para manual y para el prompt): bloques CONTINUOS de 2-3 spans por clip (presentación + reacción en un bloque + UN bloque de comentarios unificado al final; sin rol comentarios si no hay lectura real). Las pausas internas se conservan; se corta solo en pausas reales verificadas con word timestamps. No abrir spans en la costura entre items (el segmentado puede partir un visionado continuo: arrancar donde empieza el video propio). `total` ≤59s porque el snap a palabras suma ~1s. Si no entra en 60s, recortar presentación o cola de comentarios, nunca picar la reacción.
 - La `--section` va en tiempo del vivo y `--offset` la convierte a tiempo de archivo. El paneo/shift del crop vertical se calibra por sección igual que en v1 (frames inicio/medio/fin, `--shift0`/`--shift1`, `--only N`).
+- Si el streamer oculta la webcam en un tramo (PiP sale negro), ese clip se monta con `--no-cam` (verificar presencia de la cámara en frames del rango del clip, no asumir).
 
 ## Gotchas FFmpeg (verificados)
 

@@ -87,7 +87,7 @@ def phase_highlight(words, items, n_clips=4):
 
 
 def phase_montage(video, words, montages, out, shift0=0.0, shift1=0.0,
-                  pan_t0=0.0, pan_dur=1.0):
+                  pan_t0=0.0, pan_dur=1.0, no_cam=False):
     for m in montages["montages"]:
         spans = [dict(s) for s in m["spans"]]
         if not spans:
@@ -117,7 +117,7 @@ def phase_montage(video, words, montages, out, shift0=0.0, shift1=0.0,
             cmd += ["-ss", str(sp["start"]), "-t", str(round(sp["end"] - sp["start"], 3)),
                     "-i", str(Path(video).resolve())]
         cmd += ["-filter_complex",
-                montage_filter(len(spans), shift0, shift1, pan_t0, pan_dur, srt.name),
+                montage_filter(len(spans), shift0, shift1, pan_t0, pan_dur, srt.name, no_cam),
                 "-map", "[vout]", "-map", "[acat]", "-c:a", "aac", vert.name]
         r = subprocess.run(cmd, cwd=str(out))
         print(("OK " if r.returncode == 0 else "MONTAGE-FAIL ") + vert.name)
@@ -138,6 +138,8 @@ def main():
     ap.add_argument("--pan-t0", type=float, default=12.0)
     ap.add_argument("--pan-dur", type=float, default=3.5)
     ap.add_argument("--only", type=int, default=0)
+    ap.add_argument("--no-cam", action="store_true",
+                    help="sin PiP webcam (tramos donde el streamer la oculta)")
     args = ap.parse_args()
 
     words = json.loads(Path(args.words).read_text(encoding="utf-8"))
@@ -165,7 +167,7 @@ def main():
         if args.only:
             mon = {"montages": [x for x in mon["montages"] if x["rank"] == args.only]}
         phase_montage(args.video, words, mon, out, args.shift0, args.shift1,
-                      args.pan_t0, args.pan_dur)
+                      args.pan_t0, args.pan_dur, args.no_cam)
 
 
 if __name__ == "__main__":
