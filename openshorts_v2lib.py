@@ -66,3 +66,60 @@ TIME CONTRACT — STRICT:
 Transcript:
 {windows_json}
 """
+
+
+def parse_ts(ts: str) -> float:
+    """'MM:SS' o 'H:MM:SS' -> segundos. Acepta '4:20' y '1:10:40'."""
+    parts = [float(p) for p in ts.strip().split(":")]
+    total = 0.0
+    for p in parts:
+        total = total * 60 + p
+    return total
+
+
+def resolve_section(section: str, offset: float) -> tuple:
+    """'58:31-70:40' + offset 2713 -> (798.0, 1527.0) tiempo de archivo."""
+    a, b = section.split("-")
+    return (parse_ts(a) - offset, parse_ts(b) - offset)
+
+
+def _parse_srt_ts(ts: str) -> float:
+    h, m, rest = ts.split(":")
+    s, ms = rest.split(",")
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+
+
+def _fmt_srt_ts(t: float) -> str:
+    ms = int(round(t * 1000))
+    return f"{ms//3600000:02d}:{(ms//60000)%60:02d}:{(ms//1000)%60:02d},{ms%1000:03d}"
+
+
+def shift_srt(srt_text: str, delta: float) -> str:
+    """Desplaza todos los timestamps de un bloque SRT en delta segundos."""
+    out = []
+    for line in srt_text.splitlines():
+        if "-->" in line:
+            a, b = line.split("-->")
+            out.append(f"{_fmt_srt_ts(_parse_srt_ts(a.strip()) + delta)} --> {_fmt_srt_ts(_parse_srt_ts(b.strip()) + delta)}")
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def montage_srt(to_srt_fn, words, spans) -> str:
+    """Une to_srt() por span en un SRT continuo desde 00:00. Renumera bloques."""
+    chunks, cursor = [], 0.0
+    for sp in spans:
+        chunk = to_srt_fn(words, sp["start"], sp["end"]).strip()
+        if chunk:
+            chunks.append(shift_srt(chunk, cursor))
+            cursor += sp["end"] - sp["start"]
+    lines, n = [], 1
+    for chunk in chunks:
+        parts = chunk.split("\n\n")
+        for block in parts:
+            bl = block.strip().splitlines()
+            if len(bl) >= 3:
+                lines.append(f"{n}\n{bl[1]}\n" + "\n".join(bl[2:]) + "\n")
+                n += 1
+    return "\n".join(lines)
