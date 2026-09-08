@@ -13,70 +13,18 @@ Usage:
 """
 import argparse
 import json
-import os
 import sys
-import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor" / "openshorts"))
 
-from google import genai
-from google.genai import types as genai_types
-
+from openshorts_common import LANGUAGE, MODEL, build_segments, stage
 import gemini_worker
 from clip_selection import (
     build_transcript_windows,
     snap_clip_to_words,
     trim_to_best,
 )
-
-MODEL = "gemini-3.1-flash-lite"
-LANGUAGE = "Spanish"
-
-key = [l.split("=", 1)[1].strip()
-       for l in open(".env", encoding="utf-8") if l.startswith("GEMINI_API_KEY")][0]
-client = genai.Client(api_key=key)
-
-
-def build_segments(words, gap=0.8, max_len=30.0):
-    segs, cur = [], []
-    for w in words:
-        if cur and (w["start"] - cur[-1]["end"] > gap
-                    or w["end"] - cur[0]["start"] > max_len):
-            segs.append(cur)
-            cur = []
-        cur.append(w)
-    if cur:
-        segs.append(cur)
-    out = []
-    for s in segs:
-        out.append({
-            "start": s[0]["start"], "end": s[-1]["end"],
-            "text": " ".join(w["word"] for w in s),
-            "words": [{"word": w["word"], "start": w["start"], "end": w["end"]} for w in s],
-        })
-    return out
-
-
-def stage(prompt, schema, label):
-    config = genai_types.GenerateContentConfig(
-        response_mime_type="application/json", response_schema=schema)
-    for attempt in range(1, 4):
-        try:
-            resp = client.models.generate_content(model=MODEL, contents=prompt, config=config)
-            gemini_worker.raise_if_blocked(resp)
-            parsed = getattr(resp, "parsed", None)
-            if parsed is not None:
-                return parsed.model_dump() if hasattr(parsed, "model_dump") else parsed
-            return gemini_worker._parse_json_response_text(
-                gemini_worker._get_response_text(resp))
-        except gemini_worker.GeminiBlockedError:
-            raise
-        except Exception as e:
-            print(f"  transient {label} attempt {attempt}/3: {str(e)[:150]}")
-            if attempt == 3:
-                raise
-            time.sleep(5 * (2 ** (attempt - 1)))
 
 
 def main():
