@@ -1,4 +1,4 @@
-"""Shared helpers for v1 (run/cut) and v2. Import-safe: no side effects."""
+"""Shared helpers for v1 (run/cut) and v2. Import wires credentials + ffmpeg (requires .env with GEMINI_API_KEY and ffmpeg on PATH/WinGet)."""
 import glob
 import json
 import os

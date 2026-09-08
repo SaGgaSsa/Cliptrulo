@@ -13,7 +13,7 @@ $py = ".\.venv\Scripts\python.exe"
 & $py openshorts_v2.py --video "downloads\MITAD.mp4" --words "downloads\mitad_words.json" --section "MM:SS-MM:SS" --offset N --out "output\v2\seccion" --phase all
 ```
 
-- Setup: Python 3.12 + `.\.venv\Scripts\pip.exe install -r requirements.txt` (`faster-whisper`, `google-genai`, `python-dotenv`). FFmpeg se autodetecta en PATH o paquete WinGet de Gyan (`find_ffmpeg()` en `local_transcribe.py` / `openshorts_cut.py`).
+- Setup: Python 3.12 + `.\.venv\Scripts\pip.exe install -r requirements.txt` (`faster-whisper`, `google-genai`, `python-dotenv`). FFmpeg se autodetecta en PATH o paquete WinGet de Gyan (`find_ffmpeg()` en `openshorts_common.py`, usado por cut/transcribe).
 - Orden obligatorio: transcribir (1 vez) → run (score → detail) → cut → show. `*_words.json` en `downloads/` es caché: no retranscribir salvo que cambie el video.
 - No hay tests, lint, typecheck ni CI. No hay `opencode.json`.
 

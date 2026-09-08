@@ -90,13 +90,21 @@ def phase_montage(video, words, montages, out, shift0=0.0, shift1=0.0,
                   pan_t0=0.0, pan_dur=1.0):
     for m in montages["montages"]:
         spans = [dict(s) for s in m["spans"]]
+        if not spans:
+            print(f"  SKIP clip {m['rank']}: sin spans")
+            continue
         # Clamp a timeline monótona: ningún span empieza antes del fin del anterior.
         for i in range(1, len(spans)):
             if spans[i]["start"] < spans[i-1]["end"]:
                 spans[i]["start"] = spans[i-1]["end"]
-        if m["total"] < 15.0:
+        spans = [s for s in spans if s["end"] > s["start"]]
+        if not spans:
+            print(f"  SKIP clip {m['rank']}: spans vacíos tras clamp")
+            continue
+        total = round(sum(s["end"] - s["start"] for s in spans), 3)
+        if total < 15.0:
             # Extender el ÚLTIMO span (conserva narrativa) hasta 15s.
-            need = 15.0 - m["total"]
+            need = 15.0 - total
             spans[-1] = dict(spans[-1], end=spans[-1]["end"] + need)
             m["total"] = 15.0
         srt_text = montage_srt(to_srt, words, spans)
@@ -160,4 +168,5 @@ def main():
                       args.pan_t0, args.pan_dur)
 
 
-main()
+if __name__ == "__main__":
+    main()
