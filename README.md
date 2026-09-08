@@ -32,6 +32,9 @@ Requiere Python 3.12 y FFmpeg (se autodetecta en PATH o en el paquete WinGet de 
 # .env ya trae GEMINI_API_KEY configurada
 ```
 
+> Clon fresco: `git clone --recurse-submodules <url>` (o `git submodule update --init`
+> si ya clonaste). `vendor/openshorts` es un submódulo del upstream: no editarlo.
+
 ## Uso (siempre desde la raíz del proyecto)
 
 ```powershell

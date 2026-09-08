@@ -22,7 +22,7 @@ $py = ".\.venv\Scripts\python.exe"
 - `openshorts_run.py` lee `GEMINI_API_KEY` parseando `.env` a mano (`:36-37`), no usa dotenv. No commitear `.env`.
 - `--duration` debe ser la duración real del video pasado en `--video`. Defaults: `--min-clips 3 --max-clips 5` (normal), `6-10` + `--shortlist-cap 14` (filtro libre). Clips siempre 15–60s; `cut` extiende a 15s mínimo (`openshorts_cut.py:68-69`).
 - Timestamps de `shorts.json` son relativos al `--video` dado. Si el video es un recorte, sumar offset manual (ej. segunda mitad offset 2713s). `show_shorts.py` acepta offset como 3er arg e imprime tiempo archivo vs absoluto.
-- `vendor/openshorts/` es solo lectura: reutilizar prompts, schemas, `build_transcript_windows` / `snap_clip_to_words` / `trim_to_best`. No editarlo, no seguir su `CLAUDE.md` (habla de Docker/FastAPI/React: no aplica aquí).
+- `vendor/openshorts/` es submódulo del upstream (fijado a un commit) y solo lectura: reutilizar prompts, schemas, `build_transcript_windows` / `snap_clip_to_words` / `trim_to_best`. No editarlo, no seguir su `CLAUDE.md` (habla de Docker/FastAPI/React: no aplica aquí). Clon fresco: `git clone --recurse-submodules` o `git submodule update --init`.
 
 ## Gotchas FFmpeg (verificados)
 
