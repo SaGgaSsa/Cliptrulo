@@ -7,13 +7,14 @@ Usage:
 """
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor" / "openshorts"))
 
-from openshorts_common import LANGUAGE, build_segments, stage
-from openshorts_v2lib import HIGHLIGHT_PROMPT_TEMPLATE, HighlightResponse, SEGMENT_PROMPT_TEMPLATE, SegmentResponse, resolve_section
+from openshorts_common import FF, LANGUAGE, build_segments, stage, to_srt
+from openshorts_v2lib import HIGHLIGHT_PROMPT_TEMPLATE, HighlightResponse, SEGMENT_PROMPT_TEMPLATE, SegmentResponse, montage_filter, montage_srt, resolve_section
 from clip_selection import build_transcript_windows, snap_clip_to_words
 
 
@@ -85,6 +86,35 @@ def phase_highlight(words, items, n_clips=4):
     return {"montages": montages}
 
 
+def phase_montage(video, words, montages, out, shift0=0.0, shift1=0.0,
+                  pan_t0=0.0, pan_dur=1.0):
+    for m in montages["montages"]:
+        spans = [dict(s) for s in m["spans"]]
+        # Clamp a timeline monótona: ningún span empieza antes del fin del anterior.
+        for i in range(1, len(spans)):
+            if spans[i]["start"] < spans[i-1]["end"]:
+                spans[i]["start"] = spans[i-1]["end"]
+        if m["total"] < 15.0:
+            # Extender el ÚLTIMO span (conserva narrativa) hasta 15s.
+            need = 15.0 - m["total"]
+            spans[-1] = dict(spans[-1], end=spans[-1]["end"] + need)
+            m["total"] = 15.0
+        srt_text = montage_srt(to_srt, words, spans)
+        base = out / f"clip_{m['rank']:02d}"
+        srt = base.with_suffix(".srt")
+        vert = Path(str(base) + "_9x16.mp4")
+        srt.write_text(srt_text, encoding="utf-8")
+        cmd = [FF, "-y", "-v", "error"]
+        for sp in spans:
+            cmd += ["-ss", str(sp["start"]), "-t", str(round(sp["end"] - sp["start"], 3)),
+                    "-i", str(Path(video).resolve())]
+        cmd += ["-filter_complex",
+                montage_filter(len(spans), shift0, shift1, pan_t0, pan_dur, srt.name),
+                "-map", "[vout]", "-map", "[acat]", "-c:a", "aac", vert.name]
+        r = subprocess.run(cmd, cwd=str(out))
+        print(("OK " if r.returncode == 0 else "MONTAGE-FAIL ") + vert.name)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
@@ -95,6 +125,11 @@ def main():
     ap.add_argument("--phase", default="all",
                     choices=["segment", "highlight", "montage", "all"])
     ap.add_argument("--clips", type=int, default=4)
+    ap.add_argument("--shift0", type=float, default=0.20)
+    ap.add_argument("--shift1", type=float, default=0.0)
+    ap.add_argument("--pan-t0", type=float, default=12.0)
+    ap.add_argument("--pan-dur", type=float, default=3.5)
+    ap.add_argument("--only", type=int, default=0)
     args = ap.parse_args()
 
     words = json.loads(Path(args.words).read_text(encoding="utf-8"))
@@ -116,6 +151,13 @@ def main():
                                            encoding="utf-8")
         for m in mon["montages"]:
             print(f"- clip {m['rank']}: total={m['total']:.1f}s spans={len(m['spans'])}")
+
+    if args.phase in ("montage", "all"):
+        mon = json.loads((out / "montages.json").read_text(encoding="utf-8"))
+        if args.only:
+            mon = {"montages": [x for x in mon["montages"] if x["rank"] == args.only]}
+        phase_montage(args.video, words, mon, out, args.shift0, args.shift1,
+                      args.pan_t0, args.pan_dur)
 
 
 main()
