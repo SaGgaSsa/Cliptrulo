@@ -1,0 +1,3 @@
+[submodule "vendor/openshorts"]
+	path = vendor/openshorts
+	url = https://github.com/mutonby/openshorts.git

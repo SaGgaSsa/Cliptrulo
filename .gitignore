@@ -1,0 +1,20 @@
+# Secrets / entorno local
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Videos fuente (pesados): solo se versionan los transcripts *_words.json
+downloads/*.mp4
+downloads/*.MP4
+downloads/*.mkv
+downloads/*.webm
+
+# Clips generados
+output/
+
+# Audio temporal de local_transcribe.py
+*.wav
