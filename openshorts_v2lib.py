@@ -57,11 +57,18 @@ You are a senior short-form video editor. Below is the transcript of ONE item
 
 TIME CONTRACT — STRICT:
 - {item_a} <= start < end <= {item_b}. Numbers with up to 3 decimals.
-- Every span must be 3-25s long. Return 2-5 spans, total <= 60s.
+- Return 2-3 spans, total <= 59s (word-snapping adds ~1s; hard cap is 60s).
+- Spans are CONTINUOUS blocks: include the natural pauses inside them.
+  Cut ONLY in real pauses between blocks, never mid-sentence, never to
+  remove content between two peaks of the same moment.
 - Order spans chronologically. Roles in narrative order when possible:
   presentacion first (how the host introduces the video, 5-10s),
-  then mejor_reaccion (the peak moment(s)),
-  then comentarios (chat reads that add something — not all of them).
+  then mejor_reaccion (ONE continuous block with the peak moment(s)),
+  then comentarios (ONE single trailing block with the chat reads that add
+  something — unify them, do not split across spans; omit the role if there
+  is no real chat reading in this item).
+- If the item starts mid-video (speech continuous across {item_a}), open the
+  first span where this video's own content begins, not at {item_a}.
 
 Transcript:
 {windows_json}
