@@ -21,13 +21,15 @@ $py = ".\.venv\Scripts\python.exe"
 
 - Modelo: `gemini-3.1-flash-lite` hardcodeado en `openshorts_run.py:33`. No usar `gemini-2.5-*` (dado de baja) ni `3.6-flash` (503 por saturación).
 - `openshorts_run.py` lee `GEMINI_API_KEY` parseando `.env` a mano (`:36-37`), no usa dotenv. No commitear `.env`.
-- `--duration` debe ser la duración real del video pasado en `--video`. Defaults: `--min-clips 3 --max-clips 5` (normal), `6-10` + `--shortlist-cap 14` (filtro libre). Clips siempre 15–60s; `cut` extiende a 15s mínimo (`openshorts_cut.py:68-69`).
+- `--duration` debe ser la duración real del video pasado en `--video`. Defaults: `--min-clips 3 --max-clips 5` (normal), `6-10` + `--shortlist-cap 14` (filtro libre). Clips siempre 15–59s; `cut` extiende a 15s mínimo (`openshorts_cut.py:68-69`).
 - Timestamps de `shorts.json` son relativos al `--video` dado. Si el video es un recorte, sumar offset manual (ej. segunda mitad offset 2713s). `show_shorts.py` acepta offset como 3er arg e imprime tiempo archivo vs absoluto.
 - `vendor/openshorts/` es submódulo del upstream (fijado a un commit) y solo lectura: reutilizar prompts, schemas, `build_transcript_windows` / `snap_clip_to_words` / `trim_to_best`. No editarlo, no seguir su `CLAUDE.md` (habla de Docker/FastAPI/React: no aplica aquí). Clon fresco: `git clone --recurse-submodules` o `git submodule update --init`.
-- `openshorts_v2.py` arma shorts por sección en 3 fases (`segment → highlight → montage`, `--phase all` o por fase). Salida `output\v2\<seccion>\`: `items.json`, `montages.json` (cada clip `total` ≤60s, spans con rol `presentacion`/`mejor_reaccion`/`comentarios`), `clip_NN_9x16.mp4`.
+- Formato standard de salida (fijado en `openshorts_common.py: STD_CODEC_ARGS/fps_args`): `1080x1920` mp4, H.264 yuv420p + faststart, AAC 48kHz 128k. FPS de origen si está en 23–60, si no se fuerza 30. Subtítulos en `.srt` al lado del mp4, nunca quemados.
+- `openshorts_v2.py` arma shorts por sección en 3 fases (`segment → highlight → montage`, `--phase all` o por fase). Salida `output\v2\<seccion>\`: `items.json`, `montages.json` (cada clip `total` ≤59s, spans con rol `presentacion`/`mejor_reaccion`/`comentarios`), `clip_NN_9x16.mp4`.
 - Criterio de spans v2 (vale para manual y para el prompt): bloques CONTINUOS de 2-3 spans por clip (presentación + reacción en un bloque + UN bloque de comentarios unificado al final; sin rol comentarios si no hay lectura real). Las pausas internas se conservan; se corta solo en pausas reales verificadas con word timestamps. No abrir spans en la costura entre items (el segmentado puede partir un visionado continuo: arrancar donde empieza el video propio). `total` ≤59s porque el snap a palabras suma ~1s. Si no entra en 60s, recortar presentación o cola de comentarios, nunca picar la reacción.
 - La `--section` va en tiempo del vivo y `--offset` la convierte a tiempo de archivo. El paneo/shift del crop vertical se calibra por sección igual que en v1 (frames inicio/medio/fin, `--shift0`/`--shift1`, `--only N`).
 - Si el streamer oculta la webcam en un tramo (PiP sale negro), ese clip se monta con `--no-cam` (verificar presencia de la cámara en frames del rango del clip, no asumir).
+- Si Gemini bloquea una sección con `PROHIBITED_CONTENT`, partirla en 2 sub-secciones y segmentar cada una por separado (el bloqueo suele dispararlo el payload combinado, no un tramo puntual); reintentar idéntico no sirve.
 
 ## Gotchas FFmpeg (verificados)
 

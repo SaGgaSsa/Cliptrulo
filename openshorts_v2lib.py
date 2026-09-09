@@ -132,8 +132,9 @@ def montage_srt(to_srt_fn, words, spans) -> str:
     return "\n".join(lines)
 
 
-def montage_filter(n_spans, shift0, shift1, pan_t0, pan_dur, srt_name, no_cam=False):
+def montage_filter(n_spans, shift0, shift1, pan_t0, pan_dur, no_cam=False):
     """concat de N spans (video+audio) + cadena vertical 9:16 sobre el resultado.
+    Sin subtítulos quemados: el .srt se escribe en archivo separado.
     no_cam: sin PiP webcam (para tramos donde el streamer la oculta)."""
     v_ins = "".join(f"[{i}:v]" for i in range(n_spans))
     a_ins = "".join(f"[{i}:a]" for i in range(n_spans))
@@ -141,14 +142,13 @@ def montage_filter(n_spans, shift0, shift1, pan_t0, pan_dur, srt_name, no_cam=Fa
     crop = (f"crop=ih*9/16:ih:(iw-ow)/2+ow*({sh1}+({sh0}-{sh1})"
             f"*(1-min(max((t-{t0})/{dur}\\,0)\\,1))),scale=1080:1920")
     if no_cam:
-        base = f"[vcat]{crop},subtitles={srt_name}[vout]"
+        base = f"[vcat]{crop}[vout]"
     else:
         base = (
             f"[vcat]split=2[full1][full2];"
             f"[full1]{crop}[base];"
             "[full2]crop=iw*165/1280:ih*242/720:iw*1085/1280:ih*24/720,"
             "scale=248:364[cam];"
-            "[base][cam]overlay=1080-248-20:20,"
-            f"subtitles={srt_name}[vout]"
+            "[base][cam]overlay=1080-248-20:20[vout]"
         )
     return f"{v_ins}concat=n={n_spans}:v=1:a=0[vcat];{a_ins}concat=n={n_spans}:v=0:a=1[acat];{base}"

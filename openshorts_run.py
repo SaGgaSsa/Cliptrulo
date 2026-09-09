@@ -89,7 +89,7 @@ def main():
         shorts = trim_to_best([(i, s) for i, s in enumerate(shorts)], args.max_clips)
     for s in shorts:
         ns, ne = snap_clip_to_words(s["start"], s["end"], flat, duration,
-                                    min_duration=15.0, max_duration=60.0)
+                                    min_duration=15.0, max_duration=59.0)
         s["start"], s["end"] = ns, ne
 
     out = Path(args.out)

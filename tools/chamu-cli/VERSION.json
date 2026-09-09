@@ -1,0 +1,8 @@
+{
+  "source": "release",
+  "repo": "SaGgaSsa/chamu",
+  "release_tag": "chamu-cli-dev",
+  "asset": "chamu-cli.exe",
+  "digest": "sha256:2507f5e15505442b57d0fd557ea59f8f087c1ef406ba8f55332b7e78c4024913",
+  "downloaded_at": "2026-09-09T21:26:11.445014+00:00"
+}

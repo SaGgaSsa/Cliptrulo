@@ -1,4 +1,4 @@
-"""Cut openshorts shorts: 16:9 + 9:16 vertical with burned subtitles + preview frame.
+"""Cut openshorts shorts: 16:9 + 9:16 vertical with sidecar .srt + preview frame.
 
 Usage:
   python openshorts_cut.py --video downloads/EPISODIO3_segunda_mitad_45-13_fin.mp4 \
@@ -11,7 +11,8 @@ import json
 import subprocess
 from pathlib import Path
 
-from openshorts_common import FF, to_srt, vertical_vf
+from openshorts_common import (FF, MAX_CLIP_S, MIN_CLIP_S, STD_CODEC_ARGS,
+                               fps_args, to_srt, vertical_vf)
 
 
 def main():
@@ -43,8 +44,10 @@ def main():
         if args.only and n != args.only:
             continue
         a, b = s["start"] - 0.0, s["end"]
-        if b - a < 15:
-            b = a + 15
+        if b - a < MIN_CLIP_S:
+            b = a + MIN_CLIP_S
+        if b - a > MAX_CLIP_S + 0.5:
+            raise RuntimeError(f"short {n}: dura {b - a:.1f}s > 59s")
         base = out / f"short_{n:02d}_{int(a//3600):02d}h{int(a%3600//60):02d}m{int(a%60):02d}s"
         mp4 = base.with_suffix(".mp4")
         vert = Path(str(base) + "_9x16.mp4")
@@ -54,18 +57,18 @@ def main():
             srt.write_text(to_srt(words, a, b), encoding="utf-8")
             subprocess.run([FF, "-y", "-v", "error", "-ss", str(a), "-i", str(video),
                             "-t", str(round(b - a, 3)), "-c", "copy", str(mp4)], check=True)
-        # NOTE: the subtitles filter misparses Windows drive-letter colons, so pass
-        # only the .srt basename and run ffmpeg with cwd=out.
         # 9:16 base: TikTok window drifts (streamer resizes browser mid-live), so the
         # crop pans from shift0 to shift1 (fractions of crop width) over
         # [pan_t0, pan_t0+pan_dur] seconds of clip time. Static per clip otherwise.
         # Webcam box (title CHITRULO + face, static): x=1085..1250, y=24..266
         # measured on 1280x720 source, expressed relative so 1920x1080 scales too.
-        vf = vertical_vf(args.shift0, args.shift1, args.pan_t0, args.pan_dur, srt.name)
+        # Subtítulos en .srt separado (no quemados): formato standard en common.
+        vf = vertical_vf(args.shift0, args.shift1, args.pan_t0, args.pan_dur)
         r = subprocess.run([FF, "-y", "-v", "error", "-ss", str(a), "-i", str(video.resolve()),
                             "-t", str(round(b - a, 3)), "-vf", vf,
-                            "-c:a", "aac", vert.name], cwd=str(out))
-        print(("OK " if r.returncode == 0 else "SUBTITLE-FAIL ") + vert.name)
+                            "-map", "0:v", "-map", "0:a?"] + STD_CODEC_ARGS + fps_args(video)
+                           + [str(vert.resolve())])
+        print(("OK " if r.returncode == 0 else "CUT-FAIL ") + vert.name)
         if args.only_9x16:
             continue
         mid = a + (b - a) / 2

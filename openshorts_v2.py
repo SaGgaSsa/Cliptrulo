@@ -13,7 +13,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor" / "openshorts"))
 
-from openshorts_common import FF, LANGUAGE, build_segments, stage, to_srt
+from openshorts_common import (FF, LANGUAGE, MAX_CLIP_S, MIN_CLIP_S,
+                                STD_CODEC_ARGS, build_segments, fps_args,
+                                stage, to_srt)
 from openshorts_v2lib import HIGHLIGHT_PROMPT_TEMPLATE, HighlightResponse, SEGMENT_PROMPT_TEMPLATE, SegmentResponse, montage_filter, montage_srt, resolve_section
 from clip_selection import build_transcript_windows, snap_clip_to_words
 
@@ -70,17 +72,17 @@ def phase_highlight(words, items, n_clips=4):
                                         min_duration=2.0, max_duration=30.0)
             spans.append({"start": ns, "end": ne, "role": sp["role"]})
         spans.sort(key=lambda s: s["start"])
-        # Regla dura: total <= 60s. Recortar rol 'comentarios' primero (del final).
+        # Regla dura: total <= 59s. Recortar rol 'comentarios' primero (del final).
         total = sum(s["end"] - s["start"] for s in spans)
-        while total > 60.0:
+        while total > MAX_CLIP_S:
             droppable = [s for s in reversed(spans) if s["role"] == "comentarios"]
             pool = droppable or list(reversed(spans))
             if len(spans) <= 1:
-                raise RuntimeError(f"clip {rank}: un solo span de {total:.1f}s > 60s")
+                raise RuntimeError(f"clip {rank}: un solo span de {total:.1f}s > 59s")
             spans.remove(pool[0])
             total = sum(s["end"] - s["start"] for s in spans)
         total = round(total, 3)
-        if total < 15.0:
+        if total < MIN_CLIP_S:
             print(f"  WARN clip {rank}: total {total:.1f}s < 15s, se extiende en montaje")
         montages.append({"rank": rank, "item": it, "spans": spans, "total": total})
     return {"montages": montages}
@@ -88,6 +90,7 @@ def phase_highlight(words, items, n_clips=4):
 
 def phase_montage(video, words, montages, out, shift0=0.0, shift1=0.0,
                   pan_t0=0.0, pan_dur=1.0, no_cam=False):
+    out_args = STD_CODEC_ARGS + fps_args(video)
     for m in montages["montages"]:
         spans = [dict(s) for s in m["spans"]]
         if not spans:
@@ -102,11 +105,15 @@ def phase_montage(video, words, montages, out, shift0=0.0, shift1=0.0,
             print(f"  SKIP clip {m['rank']}: spans vacíos tras clamp")
             continue
         total = round(sum(s["end"] - s["start"] for s in spans), 3)
-        if total < 15.0:
+        if total < MIN_CLIP_S:
             # Extender el ÚLTIMO span (conserva narrativa) hasta 15s.
-            need = 15.0 - total
+            need = MIN_CLIP_S - total
             spans[-1] = dict(spans[-1], end=spans[-1]["end"] + need)
-            m["total"] = 15.0
+            total = MIN_CLIP_S
+            m["total"] = total
+        if total > MAX_CLIP_S + 0.5:
+            raise RuntimeError(f"clip {m['rank']}: total {total:.1f}s > 59s")
+        # Subtítulos en archivo separado (.srt al lado del mp4), no quemados.
         srt_text = montage_srt(to_srt, words, spans)
         base = out / f"clip_{m['rank']:02d}"
         srt = base.with_suffix(".srt")
@@ -117,9 +124,9 @@ def phase_montage(video, words, montages, out, shift0=0.0, shift1=0.0,
             cmd += ["-ss", str(sp["start"]), "-t", str(round(sp["end"] - sp["start"], 3)),
                     "-i", str(Path(video).resolve())]
         cmd += ["-filter_complex",
-                montage_filter(len(spans), shift0, shift1, pan_t0, pan_dur, srt.name, no_cam),
-                "-map", "[vout]", "-map", "[acat]", "-c:a", "aac", vert.name]
-        r = subprocess.run(cmd, cwd=str(out))
+                montage_filter(len(spans), shift0, shift1, pan_t0, pan_dur, no_cam),
+                "-map", "[vout]", "-map", "[acat]"] + out_args + [str(vert.resolve())]
+        r = subprocess.run(cmd)
         print(("OK " if r.returncode == 0 else "MONTAGE-FAIL ") + vert.name)
 
 
