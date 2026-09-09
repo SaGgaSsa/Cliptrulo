@@ -18,6 +18,3 @@ output/
 
 # Audio temporal de local_transcribe.py
 *.wav
-
-# Binario chamu-cli (se baja con tools/ensure_chamu_cli.py; solo VERSION.json se versiona)
-tools/chamu-cli/*.exe
