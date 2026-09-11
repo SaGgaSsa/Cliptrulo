@@ -30,7 +30,9 @@ HYST = 2  # segundos consecutivos para confirmar cambio de escena
 MIN_SEG = 2.0  # segmentos mas cortos se fusionan con el vecino mayor
 THRESH = 0.40  # REEL reales ~0.55, resto <=0.26 (CCOEFF multiescala)
 SCALES = (0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.25)
-SAT_THRESH = 20.0  # FULL ~3, GRID ~35 (banda x 0.02-0.25)
+SAT_THRESH = 25.0  # mediana de saturacion por bloques: FULL ~3-15, GRID ~45+
+VAL_LO, VAL_HI = 60.0, 200.0  # las bandas grises son grises medios (~128)
+BLOCKS = 6
 
 # Pivot en fracciones del frame 960x540: la BARRA ENTERA de comentario
 # (carita + "Agrega un comentario..." + "Publicar"), con textura de texto.
@@ -39,9 +41,10 @@ SAT_THRESH = 20.0  # FULL ~3, GRID ~35 (banda x 0.02-0.25)
 PIVOT_FRAC = (520 / 960, 484 / 540, 790 / 960, 506 / 540)
 # ROI donde buscar el pivot (panel comentarios, abajo-derecha).
 ROI_FRAC = (0.45, 0.90, 1.0, 1.0)
-# Banda lateral para GRID vs FULL (izquierda, mitad vertical, ancha para
-# cruzar el margen gris: FULL todo gris, GRID con contenido colorido).
-SIDE_FRAC = (0.02, 0.25, 0.25, 0.75)
+# Banda lateral para GRID vs FULL (izquierda, ancha para cruzar el margen
+# gris). Se divide en bloques y se usa la MEDIANA: overlays chicos (burbujas
+# de chat, badges) ensucian 1-2 bloques sin mover la mediana.
+SIDE_FRAC = (0.02, 0.05, 0.25, 0.95)
 
 
 def norm_frame(img):
@@ -81,12 +84,23 @@ def extract_thumbs(video, start, end, outdir):
     return [os.path.join(outdir, f) for f in files]
 
 
-def side_saturation(img):
+def side_profile(img):
+    """(mediana saturacion, mediana valor) por bloques de la banda lateral."""
     h, w = img.shape[:2]
     x0, y0, x1, y1 = SIDE_FRAC
-    side = img[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
-    hsv = cv2.cvtColor(side, cv2.COLOR_BGR2HSV)
-    return float(hsv[:, :, 1].mean())
+    band = img[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
+    hsv = cv2.cvtColor(band, cv2.COLOR_BGR2HSV)
+    rows = np.array_split(hsv, BLOCKS, axis=0)
+    sats = sorted(float(b[:, :, 1].mean()) for b in rows)
+    vals = sorted(float(b[:, :, 2].mean()) for b in rows)
+    m = BLOCKS // 2
+    med = lambda a: (a[m - 1] + a[m]) / 2 if BLOCKS % 2 == 0 else a[m]
+    return med(sats), med(vals)
+
+
+def is_full(img):
+    med_sat, med_val = side_profile(img)
+    return med_sat < SAT_THRESH and VAL_LO <= med_val <= VAL_HI
 
 
 def classify(img, templ):
@@ -103,7 +117,7 @@ def classify(img, templ):
         score = max(score, float(res.max()))
     if score >= THRESH:
         return "REEL", score
-    label = "FULL" if side_saturation(img) < SAT_THRESH else "GRID"
+    label = "FULL" if is_full(img) else "GRID"
     return label, score
 
 
@@ -158,10 +172,16 @@ def to_segments(labels, start):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--video", required=True)
-    ap.add_argument("--start", type=float, required=True)
-    ap.add_argument("--end", type=float, required=True)
-    ap.add_argument("--t-ref", type=float, required=True,
-                    help="segundo con barra de comentarios visible (escena REEL)")
+    ap.add_argument("--start", type=float, default=0.0)
+    ap.add_argument("--end", type=float, default=0.0)
+    ap.add_argument("--t-ref", type=float, default=None,
+                    help="segundo con barra de comentarios visible (escena REEL); "
+                         "ignorado si se pasa --template")
+    ap.add_argument("--template", default=None,
+                    help="PNG del pivot (grises, escala H=540) reutilizable; "
+                         "se genera una vez con --save-template")
+    ap.add_argument("--save-template", default=None,
+                    help="guarda el pivot recortado de --t-ref y sale")
     ap.add_argument("--out", required=True)
     ap.add_argument("--thumbs", default=None,
                     help="dir para guardar los thumbs de auditoria")
@@ -169,7 +189,22 @@ def main():
                     help="imprime score por segundo en vez de suavizar")
     a = ap.parse_args()
 
-    templ = build_template(a.video, a.t_ref)
+    if a.save_template:
+        if a.t_ref is None:
+            raise SystemExit("--save-template requiere --t-ref")
+        templ = build_template(a.video, a.t_ref)
+        cv2.imwrite(a.save_template, templ)
+        print("OK template", a.save_template, templ.shape)
+        return
+
+    if a.template:
+        templ = cv2.imread(a.template, cv2.IMREAD_GRAYSCALE)
+        if templ is None:
+            raise SystemExit(f"no se pudo leer template: {a.template}")
+    else:
+        if a.t_ref is None:
+            raise SystemExit("se requiere --t-ref o --template")
+        templ = build_template(a.video, a.t_ref)
     keep = a.thumbs or tempfile.mkdtemp(prefix="scenes_")
     thumbs = extract_thumbs(a.video, a.start, a.end, keep)
 
