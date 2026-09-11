@@ -45,13 +45,17 @@ def fix_start(t, words):
     return t
 
 
-def fix_end(t, words):
+def fix_end(t, words, hard=False):
     """Lleva el corte a mitad de silencio: si cae dentro de una palabra o
     justo en su borde inicial, la incluye ENTERA (hasta la siguiente palabra,
     como pide el criterio) y retrocede 1ms para que el .srt no alcance la
-    palabra siguiente."""
+    palabra siguiente. Con hard=True (corte de split, no cola final) el fin
+    queda exacto en el fin de palabra sin extenderse a la siguiente."""
     t = round(t, 3)
-    hit = [w for w in words if w["start"] <= t < w["end"] or w["start"] == t]
+    if hard:
+        hit = [w for w in words if w["start"] < t <= w["end"]]
+    else:
+        hit = [w for w in words if w["start"] <= t < w["end"] or w["start"] == t]
     if hit:
         t = round(max(w["end"] for w in hit), 3)
     return round(t - EPS, 3)
@@ -91,15 +95,18 @@ def main():
             ns, ne = snap_clip_to_words(sp["start"], sp["end"], flat, it["end"],
                                         min_duration=2.0, max_duration=600.0)
             out.append({"start": fix_start(ns, words),
-                        "end": fix_end(ne, words), "role": sp["role"]})
+                        "end": fix_end(ne, words, hard=sp.get("hard", False)),
+                        "role": sp["role"]})
         out.sort(key=lambda s: s["start"])
         for i in range(1, len(out)):
             if out[i]["start"] <= out[i - 1]["end"]:
                 out[i - 1]["end"] = round(out[i]["start"] - EPS, 3)
         out = [s for s in out if s["end"] > s["start"]]
         # Cola: ~2s despues de la ultima palabra (hasta la proxima o fin de item).
-        nxt = min([w["start"] for w in words if w["start"] > out[-1]["end"]] + [it["end"]])
-        out[-1]["end"] = fix_end(min(out[-1]["end"] + TAIL_S, nxt, it["end"]), words)
+        # No se aplica si el ultimo span es corte de split ("hard": true).
+        if not spans[-1].get("hard", False):
+            nxt = min([w["start"] for w in words if w["start"] > out[-1]["end"]] + [it["end"]])
+            out[-1]["end"] = fix_end(min(out[-1]["end"] + TAIL_S, nxt, it["end"]), words)
         total = round(sum(s["end"] - s["start"] for s in out), 3)
         if total > MAX_SHORT_S:
             raise SystemExit(f"FAIL rank {p['rank']}: total {total:.1f}s > 180s, "

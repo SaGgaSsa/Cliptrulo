@@ -44,9 +44,17 @@ preferir un clip más largo pero completo antes que uno corto sin cierre.
 - Criterio de tiempos (lo aplica el validador): los cortes van en MITAD de
   silencio, nunca en borde ni dentro de palabra; la última palabra entra
   siempre entera (si el corte cae en su borde, se incluye hasta la siguiente).
+  Corte de split (no cola final): span con `"hard": true` — el fin queda exacto
+  en fin de palabra, sin cola ni palabra siguiente (si cae de golpe, outro en
+  Shotcut).
+- Acortamiento a <60s (standard redes; el crudo ya sale sin silencios, así que
+  el acorte es estructural): si el clip trae 2+ payoffs → split por payoff
+  (cada parte con presentación mínima y su remate); el browsing entre reels
+  (narración de UI, "a ver", reformulaciones) se descarta, no se reparte. Si una
+  parte sigue >60s, recortar relleno interno, nunca presentación ni remate.
 - Sin tope de 59s (el vertical va en Shotcut): tope blando 180s (Shorts admite
   3 min). El validador agrega ~2s de cola tras la última palabra (hasta la
-  próxima o fin del item); si el final cae de golpe, agregar outro mínima en Shotcut.
+  próxima o fin del item), salvo span `hard`; si el final cae de golpe, agregar outro mínima en Shotcut.
 
 `picks.json` = `{"clips": [{"rank": N, "item": {...}, "spans":
 [{"start","end","role"}]}]}`. Validar y generar `montages.json`:
