@@ -32,6 +32,29 @@ from openshorts_common import MIN_CLIP_S  # noqa: E402
 ROLES = ("presentacion", "mejor_reaccion", "comentarios")
 MAX_SHORT_S = 180.0  # YouTube Shorts admite hasta 3 min
 TAIL_S = 2.5  # cola tras la ultima palabra aunque haya silencio
+EPS = 0.001  # los cortes van 1ms antes del borde: el .srt incluye palabras
+# con start <= fin, asi un corte justo en un borde mete subtitulo sin audio
+
+
+def fix_start(t, words):
+    """Si el inicio cae dentro de una palabra, retrocede a su inicio."""
+    t = round(t, 3)
+    for w in words:
+        if w["start"] < t < w["end"]:
+            return round(w["start"], 3)
+    return t
+
+
+def fix_end(t, words):
+    """Lleva el corte a mitad de silencio: si cae dentro de una palabra o
+    justo en su borde inicial, la incluye ENTERA (hasta la siguiente palabra,
+    como pide el criterio) y retrocede 1ms para que el .srt no alcance la
+    palabra siguiente."""
+    t = round(t, 3)
+    hit = [w for w in words if w["start"] <= t < w["end"] or w["start"] == t]
+    if hit:
+        t = round(max(w["end"] for w in hit), 3)
+    return round(t - EPS, 3)
 
 
 def main():
@@ -67,16 +90,16 @@ def main():
         for sp in spans:
             ns, ne = snap_clip_to_words(sp["start"], sp["end"], flat, it["end"],
                                         min_duration=2.0, max_duration=600.0)
-            out.append({"start": ns, "end": ne, "role": sp["role"]})
+            out.append({"start": fix_start(ns, words),
+                        "end": fix_end(ne, words), "role": sp["role"]})
         out.sort(key=lambda s: s["start"])
         for i in range(1, len(out)):
-            out[i]["start"] = max(out[i]["start"], out[i - 1]["end"])
+            if out[i]["start"] <= out[i - 1]["end"]:
+                out[i - 1]["end"] = round(out[i]["start"] - EPS, 3)
         out = [s for s in out if s["end"] > s["start"]]
         # Cola: ~2s despues de la ultima palabra (hasta la proxima o fin de item).
-        nxt = min([w["start"] for w in words if w["start"] >= out[-1]["end"]] + [it["end"]])
-        tail = round(min(out[-1]["end"] + TAIL_S, nxt, it["end"]), 3)
-        if tail > out[-1]["end"]:
-            out[-1]["end"] = tail
+        nxt = min([w["start"] for w in words if w["start"] > out[-1]["end"]] + [it["end"]])
+        out[-1]["end"] = fix_end(min(out[-1]["end"] + TAIL_S, nxt, it["end"]), words)
         total = round(sum(s["end"] - s["start"] for s in out), 3)
         if total > MAX_SHORT_S:
             raise SystemExit(f"FAIL rank {p['rank']}: total {total:.1f}s > 180s, "

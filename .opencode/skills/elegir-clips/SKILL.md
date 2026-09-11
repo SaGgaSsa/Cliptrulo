@@ -41,6 +41,9 @@ preferir un clip más largo pero completo antes que uno corto sin cierre.
 - Spans = momentos con contenido (1-6 por clip, roles `presentacion` /
   `mejor_reaccion` / `comentarios`, orden libre). Los silencios y baches se
   saltean: el montaje los elimina y arma un solo video continuo.
+- Criterio de tiempos (lo aplica el validador): los cortes van en MITAD de
+  silencio, nunca en borde ni dentro de palabra; la última palabra entra
+  siempre entera (si el corte cae en su borde, se incluye hasta la siguiente).
 - Sin tope de 59s (el vertical va en Shotcut): tope blando 180s (Shorts admite
   3 min). El validador agrega ~2s de cola tras la última palabra (hasta la
   próxima o fin del item); si el final cae de golpe, agregar outro mínima en Shotcut.
