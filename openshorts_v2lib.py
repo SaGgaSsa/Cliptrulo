@@ -132,6 +132,15 @@ def montage_srt(to_srt_fn, words, spans) -> str:
     return "\n".join(lines)
 
 
+def crudo_filter(n_spans):
+    """concat de N spans (video+audio) sin crop ni PiP: crudo 16:9.
+    El vertical se arma después en Shotcut."""
+    v_ins = "".join(f"[{i}:v]" for i in range(n_spans))
+    a_ins = "".join(f"[{i}:a]" for i in range(n_spans))
+    return (f"{v_ins}concat=n={n_spans}:v=1:a=0[vout];"
+            f"{a_ins}concat=n={n_spans}:v=0:a=1[acat]")
+
+
 def montage_filter(n_spans, shift0, shift1, pan_t0, pan_dur, no_cam=False):
     """concat de N spans (video+audio) + cadena vertical 9:16 sobre el resultado.
     Sin subtítulos quemados: el .srt se escribe en archivo separado.

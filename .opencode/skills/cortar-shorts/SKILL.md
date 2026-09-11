@@ -29,11 +29,11 @@ El agente propone qué secciones (y cuántos clips) valen la pena desde los `ite
 
 ## Fase cara (solo elegidas)
 1. `--phase highlight --clips N`. Exigir spans CONTINUOS (2-3 por clip, pausas adentro, corte solo en pausas reales = `silences[]` del chamu JSON, UN bloque comentarios al final u omitirlo, `total` ≤59s, no abrir en costuras entre items).
-2. Calibrar crop con frames inicio/medio/fin: shift = (centro_contenido − centro_frame) / ancho_crop; verificar webcam en cada rango (`--no-cam` si está oculta).
-3. `--phase montage --shift0 X --shift1 Y [--no-cam]`. Verificar: ffprobe (1080x1920, h264, aac 48kHz, ≤59s) + frame apertura/mid.
+2. `--phase montage` → por clip: `clip_NN.mp4` crudo 16:9 + `clip_NN.srt` al lado (sin crop, sin PiP, sin calibración: el vertical va en Shotcut).
+3. Vertical en Shotcut (proyecto `1080x1920` 30fps por clip): V1 = crop ventana + `affine`, V2 = crop caja cámara + `affine` a `260x292` en `(800,20)`. Receta `affine`: solo `transition.rect` + `transition.fill=1` + `transition.distort=0`. Ver detalle y workarounds en `AGENTS.md` (sección Shotcut MCP).
 
 ## Standard de salida
-`clip_01_9x16.mp4` + `clip_01.srt` al lado (nunca quemados) + `items.json`/`montages.json` por carpeta de sección. Watermarks de plataforma vienen en la fuente: descartar en revisión los clips donde tapen contenido.
+`clip_NN.mp4` crudo 16:9 + `clip_NN.srt` al lado + `items.json`/`montages.json` por carpeta de sección. El vertical 9:16 se arma en Shotcut (ver fase cara). Watermarks de plataforma vienen en la fuente: descartar en revisión los clips donde tapen contenido.
 
 ## Common mistakes
 - Invocar chamu-cli con redirect `>` de PowerShell 5.1 (escribe UTF-16 y rompe el JSON): llamar desde Python con `subprocess` (bytes → utf-8) o redirigir con `cmd /c`.
