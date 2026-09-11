@@ -4,12 +4,15 @@ picks.json: {"clips": [{"rank": 1,
   "item": {"start": 649.0, "end": 740.0, "kind": "visionado",
            "score": 85, "summary": "..."},
   "spans": [{"start": 649.8, "end": 678.8, "role": "presentacion"}, ...]}]}
-Roles validos: presentacion | mejor_reaccion | comentarios.
+Roles validos: presentacion | mejor_reaccion | comentarios (orden libre).
 
-Valida: snap a palabras, spans monotonos, 2-3 spans, total<=59 (si pasa,
-falla y el agente recorta), total<15 (extiende ultimo span), cortes cerca
+Valida: snap a palabras, spans monotonos, 1-6 spans por clip (momentos con
+contenido; los silencios/baches se saltean y el montaje los elimina),
+total<=180s (tope Shorts 3min; si pasa, falla y el agente recorta),
+total<15 (extiende ultimo span), cola de ~2s tras la ultima palabra
+(hasta la proxima palabra o fin del item, lo que llegue antes), cortes cerca
 de silencios reales (aviso). Conserva ranks no mencionados del montages
-existente (ej. clip_02 intacto).
+existente.
 
 Uso:
   python montage_from_picks.py --words downloads/X_words.json \
@@ -24,9 +27,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor" / "openshorts"))
 from clip_selection import snap_clip_to_words  # noqa: E402
 
-from openshorts_common import MAX_CLIP_S, MIN_CLIP_S  # noqa: E402
+from openshorts_common import MIN_CLIP_S  # noqa: E402
 
 ROLES = ("presentacion", "mejor_reaccion", "comentarios")
+MAX_SHORT_S = 180.0  # YouTube Shorts admite hasta 3 min
+TAIL_S = 2.5  # cola tras la ultima palabra aunque haya silencio
 
 
 def main():
@@ -56,21 +61,26 @@ def main():
     for p in picks:
         it, spans = p["item"], [dict(s) for s in p["spans"]]
         assert it["kind"] in ("presentacion", "visionado", "reaccion", "comentarios"), it
-        assert 2 <= len(spans) <= 3, f"rank {p['rank']}: {len(spans)} spans (2-3)"
+        assert 1 <= len(spans) <= 6, f"rank {p['rank']}: {len(spans)} spans (1-6)"
         assert all(s["role"] in ROLES for s in spans), spans
         out = []
         for sp in spans:
             ns, ne = snap_clip_to_words(sp["start"], sp["end"], flat, it["end"],
-                                        min_duration=2.0, max_duration=30.0)
+                                        min_duration=2.0, max_duration=600.0)
             out.append({"start": ns, "end": ne, "role": sp["role"]})
         out.sort(key=lambda s: s["start"])
         for i in range(1, len(out)):
             out[i]["start"] = max(out[i]["start"], out[i - 1]["end"])
         out = [s for s in out if s["end"] > s["start"]]
+        # Cola: ~2s despues de la ultima palabra (hasta la proxima o fin de item).
+        nxt = min([w["start"] for w in words if w["start"] >= out[-1]["end"]] + [it["end"]])
+        tail = round(min(out[-1]["end"] + TAIL_S, nxt, it["end"]), 3)
+        if tail > out[-1]["end"]:
+            out[-1]["end"] = tail
         total = round(sum(s["end"] - s["start"] for s in out), 3)
-        if total > MAX_CLIP_S:
-            raise SystemExit(f"FAIL rank {p['rank']}: total {total:.1f}s > 59s, "
-                             f"recorta presentacion o comentarios y reintenta")
+        if total > MAX_SHORT_S:
+            raise SystemExit(f"FAIL rank {p['rank']}: total {total:.1f}s > 180s, "
+                             f"recorta y reintenta")
         if total < MIN_CLIP_S:
             out[-1]["end"] = round(out[-1]["end"] + (MIN_CLIP_S - total), 3)
             total = MIN_CLIP_S

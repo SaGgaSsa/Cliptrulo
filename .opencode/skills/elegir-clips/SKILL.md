@@ -28,16 +28,22 @@ Schema por item: `{"start","end","kind","score","summary"}`.
 
 ## Paso 3 — elegir clips (→ `picks.json` → `montages.json`)
 
-Por cada item elegido (top por score, nunca `relleno`):
+Cada clip debe funcionar SOLO: suficiente contexto para entender qué mira o
+lee, la reacción COMPLETA y el remate si lo hay. No cortar demasiado justo:
+preferir un clip más largo pero completo antes que uno corto sin cierre.
 
-- 2-3 spans CONTINUOS, `total` ≤59s (el snap suma ~1s; tope duro 60s).
-- Orden narrativo: `presentacion` (5-10s) + `mejor_reaccion` (UN bloque continuo
-  con el pico) + `comentarios` (UN bloque unificado al final; omitir si no hay
-  lectura real de chat).
-- Las pausas internas se conservan; cortar SOLO en pausas reales `[SILENCIO]`.
-- No abrir spans en la costura entre items (si el item arranca mid-video,
-  arrancar donde empieza el video propio).
-- Si no entra en 60s: recortar presentación o cola de comentarios, NUNCA la reacción.
+- Priorizar: reacción clara/graciosa/inesperada; que se entienda qué la provocó;
+  comienzo natural y final claro; no terminar mientras la reacción sigue; si lee
+  comentarios, incluir el comentario necesario para entender la respuesta.
+- Evitar: una frase aislada, un remate sin contexto, una reacción cortada.
+- Arco típico (todo entra en UN clip): presentación del video + chiste/reacción +
+  lectura de comentarios + pase al siguiente video (ese pase es el final natural).
+- Spans = momentos con contenido (1-6 por clip, roles `presentacion` /
+  `mejor_reaccion` / `comentarios`, orden libre). Los silencios y baches se
+  saltean: el montaje los elimina y arma un solo video continuo.
+- Sin tope de 59s (el vertical va en Shotcut): tope blando 180s (Shorts admite
+  3 min). El validador agrega ~2s de cola tras la última palabra (hasta la
+  próxima o fin del item); si el final cae de golpe, agregar outro mínima en Shotcut.
 
 `picks.json` = `{"clips": [{"rank": N, "item": {...}, "spans":
 [{"start","end","role"}]}]}`. Validar y generar `montages.json`:
@@ -46,9 +52,9 @@ Por cada item elegido (top por score, nunca `relleno`):
 & $py montage_from_picks.py --words "downloads\<SEC>_words.json" --silences "downloads\<SEC>_silences.json" --items "output\<SEC>\items.json" --picks "output\<SEC>\picks.json" --montages "output\<SEC>\montages.json"
 ```
 
-El script hace snap a palabras, exige 2-3 spans y `total` ≤59 (falla si pasa:
-recortar y reintentar), extiende a 15s si falta, avisa si un corte cae lejos
-de silencios, y CONSERVA ranks no mencionados (clip ya validado queda intacto).
+El script hace snap a palabras, admite 1-6 spans y `total` ≤180s (falla si pasa:
+recortar y reintentar), extiende a 15s si falta, agrega ~2s de cola final,
+avisa si un corte cae lejos de silencios.
 
 ## Paso 4 — cortar crudo
 
@@ -56,5 +62,5 @@ de silencios, y CONSERVA ranks no mencionados (clip ya validado queda intacto).
 & $py openshorts_v2.py --video "downloads\<SEC>.mp4" --words "downloads\<SEC>_words.json" --section "<MM:SS-MM:SS vivo>" --offset 0 --out "output\<SEC>" --phase montage [--only N]
 ```
 
-Verificar: ffprobe (`h264`, resolución fuente, ≤59s) + 1 frame inicio/fin.
+Verificar: ffprobe (`h264`, resolución fuente, ≤180s) + 1 frame inicio/fin.
 Salida por clip: `clip_NN.mp4` crudo 16:9 + `clip_NN.srt`. El vertical va en Shotcut.

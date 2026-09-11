@@ -13,7 +13,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor" / "openshorts"))
 
-from openshorts_common import (FF, LANGUAGE, MAX_CLIP_S, MIN_CLIP_S,
+from openshorts_common import (FF, LANGUAGE, MIN_CLIP_S,
                                 STD_CODEC_ARGS, build_segments, fps_args,
                                 stage, to_srt)
 from openshorts_v2lib import HIGHLIGHT_PROMPT_TEMPLATE, HighlightResponse, SEGMENT_PROMPT_TEMPLATE, SegmentResponse, crudo_filter, montage_srt, resolve_section
@@ -111,8 +111,8 @@ def phase_montage(video, words, montages, out):
             spans[-1] = dict(spans[-1], end=spans[-1]["end"] + need)
             total = MIN_CLIP_S
             m["total"] = total
-        if total > MAX_CLIP_S + 0.5:
-            raise RuntimeError(f"clip {m['rank']}: total {total:.1f}s > 59s")
+        if total > 180.0:
+            print(f"  WARN clip {m['rank']}: total {total:.1f}s > 180s (tope Shorts 3min)")
         # Subtítulos en archivo separado (.srt al lado del mp4), no quemados.
         srt_text = montage_srt(to_srt, words, spans)
         base = out / f"clip_{m['rank']:02d}"
