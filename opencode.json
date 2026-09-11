@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "shotcut": {
+      "type": "local",
+      "command": ["python", "C:\\Users\\saggassa\\Desktop\\shotcut-mcp\\scripts\\shotcut_mcp_server.py"],
+      "enabled": true
+    }
+  }
+}
