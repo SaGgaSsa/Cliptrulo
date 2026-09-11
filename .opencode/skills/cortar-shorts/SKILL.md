@@ -22,15 +22,16 @@ Pipeline por sección: bajar vivo → cortar secciones → transcribir con chamu
 2. Cortar secciones con seek EXACTO (`-ss` después de `-i`, re-encode `preset fast` — `copy` + seek rápido desplaza tiempos y rompe el mapeo): `ffmpeg -y -v error -ss {A} -i <vivo> -t {D} -c:v libx264 -preset fast -crf 18 -c:a aac "downloads/<nombre>_<ID>.mp4"`. Registrar `sections.json`: `{id, vivo, vivo_start, vivo_end, file, chamu, words, silences, out}`.
 3. Audio + transcribir por sección: wav 16kHz mono. Modelo fijo: `small` (`ggml-small.bin`, `--model-dir "%LOCALAPPDATA%\Chamu\models"` explícito; preflight: si falta, fallar). rinde ~1x tiempo real → partir el wav en cuartos de ~6 min, transcribir cada uno con su `--time-offset` absoluto (0, 345, 690, …) y unir con `chamu_merge.py out_chamu.json q1.json q2.json …` (recalcula `silences[]`). stdout a archivo con `cmd /c` (nunca redirect `>` de PowerShell: escribe UTF-16). Exit 0 = ok; 3 = sin voz; 30 min máximo por archivo chamu.
 4. Adaptar: `chamu_to_words.py <ID>_chamu.json <ID>_words.json --silences <ID>_silences.json`.
-5. `openshorts_v2.py --video <ID>.mp4 --words <ID>_words.json --section "0:00-<D>" --offset 0 --out <out> --phase segment` → `items.json`.
+5. Selección de clips con el skill `elegir-clips` (el agente clasifica items y
+   elige spans con los mismos criterios; sin Gemini) → `items.json`.
 
 ## Split (decisión, parte cara)
 El agente propone qué secciones (y cuántos clips) valen la pena desde los `items.json`; el usuario confirma. Solo las elegidas siguen.
 
 ## Fase cara (solo elegidas)
-1. `--phase highlight --clips N`. Exigir spans CONTINUOS (2-3 por clip, pausas adentro, corte solo en pausas reales = `silences[]` del chamu JSON, UN bloque comentarios al final u omitirlo, `total` ≤59s, no abrir en costuras entre items).
-2. `--phase montage` → por clip: `clip_NN.mp4` crudo 16:9 + `clip_NN.srt` al lado (sin crop, sin PiP, sin calibración: el vertical va en Shotcut).
-3. Vertical en Shotcut (proyecto `1080x1920` 30fps por clip): V1 = crop ventana + `affine`, V2 = crop caja cámara + `affine` a `260x292` en `(800,20)`. Receta `affine`: solo `transition.rect` + `transition.fill=1` + `transition.distort=0`. Ver detalle y workarounds en `AGENTS.md` (sección Shotcut MCP).
+1. `montage_from_picks.py` valida los picks y arma `montages.json` (conserva ranks ya validados).
+2. `--phase montage [--only N]` → por clip: `clip_NN.mp4` crudo 16:9 + `clip_NN.srt` al lado (sin crop, sin PiP: el vertical va en Shotcut). Verificar con ffprobe + 1 frame.
+3. Vertical en Shotcut (proyecto `1080x1920` 30fps por clip): V1 = crop ventana + `affine`, V2 = crop caja cámara + `affine`. Receta `affine`: `rect` + `transition.rect` EN SYNC + `transition.fill=1` + `transition.distort=0`; `crop` en píxeles del fuente. Ver standard y workarounds en `AGENTS.md` (sección Shotcut MCP).
 
 ## Standard de salida
 `clip_NN.mp4` crudo 16:9 + `clip_NN.srt` al lado + `items.json`/`montages.json` por carpeta de sección. El vertical 9:16 se arma en Shotcut (ver fase cara). Watermarks de plataforma vienen en la fuente: descartar en revisión los clips donde tapen contenido.
@@ -39,5 +40,4 @@ El agente propone qué secciones (y cuántos clips) valen la pena desde los `ite
 - Invocar chamu-cli con redirect `>` de PowerShell 5.1 (escribe UTF-16 y rompe el JSON): llamar desde Python con `subprocess` (bytes → utf-8) o redirigir con `cmd /c`.
 - Cortar secciones con `-c copy` o seek rápido (tiempos inexactos, todo lo demás se corre).
 - Usar `--offset` distinto de 0 en el flujo nuevo (el offset vive en `sections.json`, no en los comandos).
-- Montar (`all` o `montage`) antes de calibrar shift con frames.
 - Asumir webcam visible sin mirar el rango del clip.

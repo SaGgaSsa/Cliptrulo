@@ -19,7 +19,7 @@ $py = ".\.venv\Scripts\python.exe"
 
 ## Reglas del pipeline
 
-- Modelo: `gemini-3.1-flash-lite` hardcodeado en `openshorts_run.py:33`. No usar `gemini-2.5-*` (dado de baja) ni `3.6-flash` (503 por saturación).
+- Selección de clips SIN Gemini: la hace el agente con el skill `elegir-clips` (mismos criterios: items contiguos + score, spans continuos 2-3 por clip ≤59s, corte solo en pausas reales de `silences[]`). `montage_from_picks.py` valida picks y arma `montages.json`; `openshorts_v2.py --phase montage` corta crudo. (`openshorts_run.py` v1 y las fases `segment`/`highlight` con Gemini quedan fuera del flujo.)
 - `openshorts_run.py` lee `GEMINI_API_KEY` parseando `.env` a mano (`:36-37`), no usa dotenv. No commitear `.env`.
 - `--duration` debe ser la duración real del video pasado en `--video`. Defaults: `--min-clips 3 --max-clips 5` (normal), `6-10` + `--shortlist-cap 14` (filtro libre). Clips siempre 15–59s; `cut` extiende a 15s mínimo (`openshorts_cut.py:68-69`).
 - Timestamps de `shorts.json` son relativos al `--video` dado. Si el video es un recorte, sumar offset manual (ej. segunda mitad offset 2713s). `show_shorts.py` acepta offset como 3er arg e imprime tiempo archivo vs absoluto.
