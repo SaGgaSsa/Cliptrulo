@@ -7,11 +7,8 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Videos fuente (pesados): solo se versionan los transcripts *_words.json
-downloads/*.mp4
-downloads/*.MP4
-downloads/*.mkv
-downloads/*.webm
+# Fuentes y transcripts (todo local, no aporta al sistema)
+downloads/
 
 # Clips generados
 output/
