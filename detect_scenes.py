@@ -29,7 +29,8 @@ FPS = 1
 HYST = 2  # segundos consecutivos para confirmar cambio de escena
 MIN_SEG = 2.0  # segmentos mas cortos se fusionan con el vecino mayor
 THRESH = 0.40  # REEL reales ~0.55, resto <=0.26 (CCOEFF multiescala)
-SCALES = (0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0, 1.05, 1.1, 1.15, 1.25)
+SCALES = (0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1.0,
+          1.05, 1.1, 1.15, 1.25)
 SAT_THRESH = 25.0  # mediana de saturacion por bloques: FULL ~3-15, GRID ~45+
 VAL_LO, VAL_HI = 60.0, 200.0  # las bandas grises son grises medios (~128)
 BLOCKS = 6
@@ -41,10 +42,11 @@ BLOCKS = 6
 PIVOT_FRAC = (520 / 960, 484 / 540, 790 / 960, 506 / 540)
 # ROI donde buscar el pivot (panel comentarios, abajo-derecha).
 ROI_FRAC = (0.45, 0.90, 1.0, 1.0)
-# Banda lateral para GRID vs FULL (izquierda, ancha para cruzar el margen
-# gris). Se divide en bloques y se usa la MEDIANA: overlays chicos (burbujas
-# de chat, badges) ensucian 1-2 bloques sin mover la mediana.
-SIDE_FRAC = (0.02, 0.05, 0.25, 0.95)
+# Banda lateral para GRID vs FULL (izquierda, mitad SUPERIOR: abajo puede
+# haber overlays saturados como el badge WTF). Se divide en bloques y se
+# usa la MEDIANA: overlays chicos (burbujas de chat, badges) ensucian 1-2
+# bloques sin mover la mediana.
+SIDE_FRAC = (0.02, 0.05, 0.25, 0.50)
 
 
 def norm_frame(img):
@@ -52,7 +54,7 @@ def norm_frame(img):
     return cv2.resize(img, (int(w * H / h), H))
 
 
-def build_template(video, t_ref):
+def build_template(video, t_ref, pivot_frac=None):
     """Recorta el pivot de un frame de referencia (debe ser escena REEL)."""
     with tempfile.TemporaryDirectory() as d:
         p = os.path.join(d, "ref.png")
@@ -62,7 +64,7 @@ def build_template(video, t_ref):
             check=True)
         img = norm_frame(cv2.imread(p))
     h, w = img.shape[:2]
-    x0, y0, x1, y1 = PIVOT_FRAC
+    x0, y0, x1, y1 = pivot_frac or PIVOT_FRAC
     return cv2.cvtColor(
         img[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)],
         cv2.COLOR_BGR2GRAY)
@@ -103,19 +105,20 @@ def is_full(img):
     return med_sat < SAT_THRESH and VAL_LO <= med_val <= VAL_HI
 
 
-def classify(img, templ):
+def classify(img, templ, roi_frac=None, thresh=None, templ2=None):
     g = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     h, w = g.shape[:2]
-    x0, y0, x1, y1 = ROI_FRAC
+    x0, y0, x1, y1 = roi_frac or ROI_FRAC
     roi = g[int(y0 * h):int(y1 * h), int(x0 * w):int(x1 * w)]
     score = 0.0
-    for s in SCALES:
-        t = cv2.resize(templ, None, fx=s, fy=s)
-        if t.shape[0] > roi.shape[0] or t.shape[1] > roi.shape[1]:
-            continue
-        res = cv2.matchTemplate(roi, t, cv2.TM_CCOEFF_NORMED)
-        score = max(score, float(res.max()))
-    if score >= THRESH:
+    for t0 in [templ] + ([templ2] if templ2 is not None else []):
+        for s in SCALES:
+            t = cv2.resize(t0, None, fx=s, fy=s)
+            if t.shape[0] > roi.shape[0] or t.shape[1] > roi.shape[1]:
+                continue
+            res = cv2.matchTemplate(roi, t, cv2.TM_CCOEFF_NORMED)
+            score = max(score, float(res.max()))
+    if score >= (thresh if thresh is not None else THRESH):
         return "REEL", score
     label = "FULL" if is_full(img) else "GRID"
     return label, score
@@ -182,17 +185,36 @@ def main():
                          "se genera una vez con --save-template")
     ap.add_argument("--save-template", default=None,
                     help="guarda el pivot recortado de --t-ref y sale")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", default=None)
     ap.add_argument("--thumbs", default=None,
                     help="dir para guardar los thumbs de auditoria")
     ap.add_argument("--audit", action="store_true",
                     help="imprime score por segundo en vez de suavizar")
+    ap.add_argument("--pivot", default=None,
+                    help="fracs x0,y0,x1,y1 del pivot para --save-template "
+                         "(default: PIVOT_FRAC del vivo)")
+    ap.add_argument("--roi", default=None,
+                    help="fracs x0,y0,x1,y1 donde buscar el pivot "
+                         "(default: ROI_FRAC)")
+    ap.add_argument("--thresh", type=float, default=None,
+                    help="umbral de match del pivot (default: THRESH; "
+                         "pivot chico y estable admite 0.8, el grande ~0.4)")
+    ap.add_argument("--template2", default=None,
+                    help="segundo PNG de pivot (otro tamano de modal); "
+                         "REEL si alguno matchea")
     a = ap.parse_args()
+
+    def parse_frac(s):
+        return tuple(float(v) for v in s.split(","))
+
+    pivot_frac = parse_frac(a.pivot) if a.pivot else None
+    roi_frac = parse_frac(a.roi) if a.roi else None
+    thresh = a.thresh if a.thresh is not None else THRESH
 
     if a.save_template:
         if a.t_ref is None:
             raise SystemExit("--save-template requiere --t-ref")
-        templ = build_template(a.video, a.t_ref)
+        templ = build_template(a.video, a.t_ref, pivot_frac)
         cv2.imwrite(a.save_template, templ)
         print("OK template", a.save_template, templ.shape)
         return
@@ -204,14 +226,19 @@ def main():
     else:
         if a.t_ref is None:
             raise SystemExit("se requiere --t-ref o --template")
-        templ = build_template(a.video, a.t_ref)
+        templ = build_template(a.video, a.t_ref, pivot_frac)
+    templ2 = None
+    if a.template2:
+        templ2 = cv2.imread(a.template2, cv2.IMREAD_GRAYSCALE)
+        if templ2 is None:
+            raise SystemExit(f"no se pudo leer template2: {a.template2}")
     keep = a.thumbs or tempfile.mkdtemp(prefix="scenes_")
     thumbs = extract_thumbs(a.video, a.start, a.end, keep)
 
     raw = []
     for i, p in enumerate(thumbs):
         img = cv2.imread(p)
-        lab, score = classify(img, templ)
+        lab, score = classify(img, templ, roi_frac, thresh, templ2)
         raw.append((a.start + i, lab, round(score, 3)))
 
     if a.audit:
