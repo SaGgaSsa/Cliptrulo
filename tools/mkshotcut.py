@@ -3,7 +3,10 @@
 Estructura verificada (igual que relatando/clip_0*_shotcut.mlt):
 V1 = crop px + affine full distort=0 (partido por escena), V2-cam = crop
 caja + affine PiP 760 20 300 437 distort=0 (partido por geometria de cam),
-compositing qtblend default. Hash = MD5(primer+ultimo MB) como Shotcut.
+MUTEADA (hide=2 en la playlist: el audio sale solo de V1), compositing
+qtblend default. Si V2 arranca tarde (t0>0) se antepone <blank> para
+conservar el sync (los entry in/out son frames del productor, no timeline).
+Hash = MD5(primer+ultimo MB) como Shotcut.
 
 El spec lo arma el agente: v1 = crop al area de video medido por clip,
 v2 = `camspec.py` (detecta caja + switches, sin valores a mano).
@@ -12,6 +15,8 @@ la grande va exacta. Ver specs/ep2_wtf.json.
 
 Uso:
   python tools/mkshotcut.py [--spec specs/ep2_wtf.json]
+  python tools/mkshotcut.py --spec specs/ep2_monotributistas.json \
+      --outdir output/ep2/monotributistas --section monotributistas
 """
 import argparse
 import hashlib
@@ -101,13 +106,13 @@ def producer(doc, pid, mp4, hsh, n, crop, affine, is_cam):
     return p
 
 
-def build(nn, dur, nota, v1segs, v2segs):
+def build(nn, dur, nota, v1segs, v2segs, outdir, section):
     n = round(dur * FPS)
-    mp4 = f"C:/Users/saggassa/Desktop/cliptrulo/output/ep2/wtf/clip_{nn}.mp4"
-    hsh = file_hash(OUT / f"clip_{nn}.mp4")
+    mp4 = f"C:/Users/saggassa/Desktop/cliptrulo/{outdir}/clip_{nn}.mp4"
+    hsh = file_hash(ROOT / outdir / f"clip_{nn}.mp4")
     doc = ET.Element("mlt", LC_NUMERIC="C", version="7.40.0",
                      title="Shotcut version 26.6.25", producer="tractor0",
-                     root="C:/Users/saggassa/Desktop/cliptrulo/output/ep2/wtf")
+                     root=f"C:/Users/saggassa/Desktop/cliptrulo/{outdir}")
     ET.SubElement(doc, "profile", description="1080x1920 30.000 fps",
                   width="1080", height="1920", progressive="1",
                   sample_aspect_num="1", sample_aspect_den="1",
@@ -136,13 +141,18 @@ def build(nn, dur, nota, v1segs, v2segs):
     pl = ET.SubElement(doc, "playlist", id="playlist_v1")
     prop(pl, "shotcut:video", "1")
     prop(pl, "shotcut:name", "V1")
+    if v1ids[0][1] > 0:
+        ET.SubElement(pl, "blank", length=str(v1ids[0][1]))
     for pid, f0, f1 in v1ids:
         ET.SubElement(pl, "entry", {"producer": pid, "in": str(f0),
                                     "out": str(f1)})
     ET.SubElement(pl, "blank", length=str(n - 1 - v1ids[-1][2]))
     pl2 = ET.SubElement(doc, "playlist", id=uid("playlist"))
+    prop(pl2, "hide", 2)  # V2-cam muteada: el audio sale solo de V1
     prop(pl2, "shotcut:video", "1")
     prop(pl2, "shotcut:name", "V2-cam")
+    if v2ids[0][1] > 0:
+        ET.SubElement(pl2, "blank", length=str(v2ids[0][1]))
     for pid, f0, f1 in v2ids:
         ET.SubElement(pl2, "entry", {"producer": pid, "in": str(f0),
                                      "out": str(f1)})
@@ -152,7 +162,7 @@ def build(nn, dur, nota, v1segs, v2segs):
     prop(tr, "shotcut", "1")
     prop(tr, "shotcut:projectAudioChannels", "2")
     prop(tr, "shotcut:processingMode", "Native8Cpu")
-    prop(tr, "shotcut:projectNote", f"EP2 wtf clip_{nn} {nota}")
+    prop(tr, "shotcut:projectNote", f"EP2 {section} clip_{nn} {nota}")
     for tprod in ("background", "playlist_v1", pl2.get("id")):
         ET.SubElement(tr, "track", producer=tprod)
     for a, bt, svc, dis in [("0", "1", "mix", None), ("0", "1", "qtblend", "1"),
@@ -175,8 +185,11 @@ def build(nn, dur, nota, v1segs, v2segs):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--spec", default=str(ROOT / "specs" / "ep2_wtf.json"))
+    ap.add_argument("--outdir", default="output/ep2/wtf")
+    ap.add_argument("--section", default="wtf")
     ap.add_argument("--only", default=None)
     a = ap.parse_args()
+    out = ROOT / a.outdir
     spec = json.loads(Path(a.spec).read_text(encoding="utf-8"))
     for c in spec["clips"]:
         if a.only and c["nn"] != a.only:
@@ -188,12 +201,12 @@ def main():
         v2 = [(seg_frames(s["t0"], s["t1"], n)[0],
                seg_frames(s["t0"], s["t1"], n)[1],
                v2_crop(s["box"])) for s in c["v2"] if s["box"]]
-        doc = build(c["nn"], c["dur"], c["note"], v1, v2)
-        out = OUT / f"clip_{c['nn']}_shotcut.mlt"
+        doc = build(c["nn"], c["dur"], c["note"], v1, v2, a.outdir, a.section)
+        dest = out / f"clip_{c['nn']}_shotcut.mlt"
         tree = ET.ElementTree(doc)
         ET.indent(tree)
-        tree.write(out, encoding="utf-8", xml_declaration=True)
-        print("OK", out)
+        tree.write(dest, encoding="utf-8", xml_declaration=True)
+        print("OK", dest)
 
 
 main()
