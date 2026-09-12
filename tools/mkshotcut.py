@@ -1,16 +1,21 @@
-"""Genera proyectos Shotcut verticales 1080x1920 para los clips wtf.
+"""Genera proyectos Shotcut verticales 1080x1920 desde un spec JSON.
 
-Replica la estructura verificada de relatando/clip_0*_shotcut.mlt:
+Estructura verificada (igual que relatando/clip_0*_shotcut.mlt):
 V1 = crop px + affine full distort=0 (partido por escena), V2-cam = crop
-caja + affine PiP 760 20 300 437 distort=0 (partido por geometria STD/BIG),
+caja + affine PiP 760 20 300 437 distort=0 (partido por geometria de cam),
 compositing qtblend default. Hash = MD5(primer+ultimo MB) como Shotcut.
 
+El spec lo arma el agente: v1 = crop al area de video medido por clip,
+v2 = `camspec.py` (detecta caja + switches, sin valores a mano).
+La caja chica se expande a la receta con titulo (TITLE_TOP/TITLE_PAD_X);
+la grande va exacta. Ver specs/ep2_wtf.json.
+
 Uso:
-  python tools/mkshotcut.py   # genera output/ep2/wtf/clip_NN_shotcut.mlt
+  python tools/mkshotcut.py [--spec specs/ep2_wtf.json]
 """
+import argparse
 import hashlib
 import json
-import subprocess
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -21,42 +26,26 @@ FPS = 30
 V1_FULL = {"rect": "0 0 1080 1920", "distort": "0"}
 PIP = {"rect": "760 20 300 437", "distort": "0"}
 
-# (clip, Nframes, nota, [V1 segs (f0,f1,crop)], [V2 segs (f0,f1,crop)|None])
-C = {"central": (656, 0, 656, 0)}
-STD = (1632, 48, 51, 687)
-BIG = (1498, 308, 51, 304)
-VID = {
-    "c01": (555, 195, 585, 250),
-    "c02": (400, 195, 690, 245),
-    "c03a": (660, 60, 700, 80),
-    "c03b": (780, 55, 540, 60),
-    "c04": (750, 55, 600, 60),
-    "c567": (510, 55, 855, 60),
-}
-CLIPS = [
-    # (nn, dur_s, nota, v1, v2)
-    ("01", 58.83, "Intendente IA (56s): V1 video + PiP STD->BIG",
-     [(0, 1763, VID["c01"])],
-     [(0, 1574, STD), (1575, 1763, BIG)]),
-    ("02", 51.57, "Bardo Cacerta (51s): V1 video + PiP STD (alerta final)",
-     [(0, 1545, VID["c02"])],
-     [(0, 1484, STD)]),
-    ("03", 53.77, "Hombre arana (54s): V1 video->video2 + PiP BIG->STD",
-     [(0, 1484, VID["c03a"]), (1485, 1611, VID["c03b"])],
-     [(0, 1484, BIG), (1485, 1611, STD)]),
-    ("04", 58.70, "Percha ganadora (59s): V1 video + PiP STD->BIG",
-     [(0, 1759, VID["c04"])],
-     [(0, 1244, STD), (1245, 1759, BIG)]),
-    ("05", 46.93, "Mujeres sonidos (47s): V1 central->video + PiP STD->BIG",
-     [(0, 179, C["central"]), (180, 1406, VID["c567"])],
-     [(0, 854, STD), (855, 1406, BIG)]),
-    ("06", 58.87, "Nena tercer lugar (59s): V1 video->central + PiP BIG",
-     [(0, 1529, VID["c567"]), (1530, 1764, C["central"])],
-     [(0, 1764, BIG)]),
-    ("07", 56.47, "Pato elemento (56s): V1 video->central + PiP BIG",
-     [(0, 869, VID["c567"]), (870, 1692, C["central"])],
-     [(0, 1692, BIG)]),
-]
+# Receta PiP con titulo (standard EP2): la caja detectada es el borde azul;
+# el crop incluye el titulo CHITRULO de arriba (y0 106->48) + 10px izquierda.
+# Solo para geometria chica (la grande ya ocupa su caja exacta).
+TITLE_TOP = 48
+TITLE_PAD_X = 10
+SMALL_CAM_MAX_AREA = 100000
+
+
+def v2_crop(box):
+    """Caja detectada [x0,y0,x1,y1] -> margenes de crop (receta con titulo)."""
+    x0, y0, x1, y1 = box
+    if (x1 - x0) * (y1 - y0) < SMALL_CAM_MAX_AREA:
+        return (x0 - TITLE_PAD_X, TITLE_TOP, 1920 - x1, 1080 - (y1 + 1))
+    return (x0, y0, 1920 - x1, 1080 - y1)
+
+
+def seg_frames(t0, t1, n):
+    f0 = round(t0 * FPS)
+    f1 = min(round(t1 * FPS) - 1, n - 2)
+    return f0, f1
 
 
 def file_hash(p: Path) -> str:
@@ -184,9 +173,23 @@ def build(nn, dur, nota, v1segs, v2segs):
 
 
 def main():
-    for nn, dur, nota, v1, v2 in CLIPS:
-        doc = build(nn, dur, nota, v1, v2)
-        out = OUT / f"clip_{nn}_shotcut.mlt"
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--spec", default=str(ROOT / "specs" / "ep2_wtf.json"))
+    ap.add_argument("--only", default=None)
+    a = ap.parse_args()
+    spec = json.loads(Path(a.spec).read_text(encoding="utf-8"))
+    for c in spec["clips"]:
+        if a.only and c["nn"] != a.only:
+            continue
+        n = round(c["dur"] * FPS)
+        v1 = [(seg_frames(s["t0"], s["t1"], n)[0],
+               seg_frames(s["t0"], s["t1"], n)[1],
+               tuple(s["crop"])) for s in c["v1"]]
+        v2 = [(seg_frames(s["t0"], s["t1"], n)[0],
+               seg_frames(s["t0"], s["t1"], n)[1],
+               v2_crop(s["box"])) for s in c["v2"] if s["box"]]
+        doc = build(c["nn"], c["dur"], c["note"], v1, v2)
+        out = OUT / f"clip_{c['nn']}_shotcut.mlt"
         tree = ET.ElementTree(doc)
         ET.indent(tree)
         tree.write(out, encoding="utf-8", xml_declaration=True)

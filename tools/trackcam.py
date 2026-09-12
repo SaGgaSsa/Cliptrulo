@@ -1,8 +1,9 @@
-"""Rastrea la caja de la webcam por borde cyan (bore accurate) cada N segundos.
+"""Rastrea la caja de la webcam por borde azul (seeks accurate) cada N segundos.
 
 Uso:
   python tools/trackcam.py <video> [--step 5] [--out dbg.png]
 Imprime: t + caja (x0 y0 x1 y1 en 1920x1080) o NONE. Guarda tira debug.
+Tambien importable: grab(video, t, d), find_cyan_boxes(img), scan(video, ts).
 """
 import argparse
 import os
@@ -47,6 +48,16 @@ def find_cyan_boxes(img):
     return boxes
 
 
+def scan(video, ts, debug=False):
+    """Barrido compartiendo tempdir: [(t, boxes, img|None)]."""
+    out = []
+    with tempfile.TemporaryDirectory() as d:
+        for t in ts:
+            img = grab(video, t, d)
+            out.append((t, find_cyan_boxes(img), img if debug else None))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("video")
@@ -62,18 +73,15 @@ def main():
     t1 = a.t1 or (dur - 0.5)
     ts = [round(x, 1) for x in np.arange(a.t0, t1, a.step)]
     thumbs = []
-    with tempfile.TemporaryDirectory() as d:
-        for t in ts:
-            img = grab(a.video, t, d)
-            boxes = find_cyan_boxes(img)
-            tag = "NONE" if not boxes else " ".join(
-                f"({x0},{y0},{x1},{y1})" for x0, y0, x1, y1 in boxes[:2])
-            print(f"t={t:6.1f} {tag}", flush=True)
-            if a.out:
-                dbg = img.copy()
-                for x0, y0, x1, y1 in boxes[:2]:
-                    cv2.rectangle(dbg, (x0, y0), (x1, y1), (0, 255, 0), 4)
-                thumbs.append(cv2.resize(dbg, (480, 270)))
+    for t, boxes, img in scan(video=a.video, ts=ts, debug=bool(a.out)):
+        tag = "NONE" if not boxes else " ".join(
+            f"({x0},{y0},{x1},{y1})" for x0, y0, x1, y1 in boxes[:2])
+        print(f"t={t:6.1f} {tag}", flush=True)
+        if a.out:
+            dbg = img.copy()
+            for x0, y0, x1, y1 in boxes[:2]:
+                cv2.rectangle(dbg, (x0, y0), (x1, y1), (0, 255, 0), 4)
+            thumbs.append(cv2.resize(dbg, (480, 270)))
     if a.out and thumbs:
         rows = [np.hstack(thumbs[i:i + 4])
                 for i in range(0, len(thumbs), 4)]
@@ -84,4 +92,5 @@ def main():
         print("OK", a.out)
 
 
-main()
+if __name__ == "__main__":
+    main()
