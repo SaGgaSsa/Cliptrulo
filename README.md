@@ -1,71 +1,53 @@
 # Cliptrulo
 
-Pipeline propio para convertir lives largos de Chitrulo (reacciones a TikToks/reels)
-en shorts verticales 9:16 listos para TikTok / Reels / Shorts.
+Pipeline local para convertir lives en proyectos verticales editables, organizado en dos skills.
 
-Usa el detector de momentos de [OpenShorts](https://github.com/mutonby/openshorts)
-(`vendor/openshorts`, MIT) con Gemini 3.1 Flash-Lite, más empaquetado propio con FFmpeg
-(recorte vertical + webcam en picture-in-picture + subtítulos quemados).
+## 1. Preparar: `cortar-shorts`
 
-## Estructura
+Recibe un video local o URL y secciones del vivo. Prepara MP4 por sección, extrae WAV mono 16 kHz, transcribe con Chamu CLI (`small`) y adapta los resultados.
 
-```text
-cliptrulo/
-├── vendor/openshorts/      # cerebro: prompts, schemas, windowing, word-snapping (solo lectura)
-├── openshorts_run.py       # selección de momentos en 2 pasadas (score → detail) con Gemini
-├── openshorts_cut.py       # corte 16:9 + 9:16 (PiP webcam + subtítulos) + frame de control
-├── local_transcribe.py     # transcripción local con faster-whisper → words JSON
-├── show_shorts.py          # muestra hook/título/transcripción de cada short
-├── downloads/              # videos fuente + transcripts cacheados (*_words.json)
-├── output/                 # clips generados (16:9, 9:16, .srt, manifest/shorts.json)
-├── .env                    # GEMINI_API_KEY (no commitear)
-└── requirements.txt
-```
+Entrega `sections.json` y, por sección, MP4, WAV, `*_chamu.json`, `*_words.json` y `*_silences.json`. Aquí termina este skill: no selecciona ni monta clips.
 
-## Setup (Windows)
+Los medios y JSONs de cada sección empiezan en 0. `sections.json` conserva el mapeo al vivo mediante `vivo_start` y `vivo_end`. Reusar la transcripción si no cambió el medio ni el rango.
 
-Requiere Python 3.12 y FFmpeg (se autodetecta en PATH o en el paquete WinGet de Gyan).
+## 2. Seleccionar y montar: `elegir-clips`
+
+Recibe esa entrega. El agente lee la transcripción y selecciona momentos graciosos con contexto, reacción y cierre; produce `items.json` y `picks.json`. No hay selector automático alternativo.
+
+`montage_from_picks.py` valida los picks y genera `montages.json`. Después de aprobar la selección, `openshorts_v2.py` corta crudos y subtítulos externos. La única fase disponible es `montage`, también predeterminada.
+
+Luego el agente crea y revisa proyectos Shotcut `1080x1920`, con contenido y webcam encuadrados según el medio real. Entrega `clip_NN.mp4`, `clip_NN.srt`, `clip_NN_vertical.mlt` y previews. Exportación final solo por pedido explícito; no quemar subtítulos.
+
+## Setup
+
+Python 3.12, FFmpeg/FFprobe y Shotcut con MCP. Para descargar videos se necesita yt-dlp. Chamu CLI se prepara con `tools/ensure_chamu_cli.py`; su modelo `small` debe estar disponible antes de transcribir.
 
 ```powershell
-& "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe" -m venv .venv
 .\.venv\Scripts\pip.exe install -r requirements.txt
-# .env ya trae GEMINI_API_KEY configurada
+.\.venv\Scripts\python.exe tools/ensure_chamu_cli.py
 ```
 
-> Clon fresco: `git clone --recurse-submodules <url>` (o `git submodule update --init`
-> si ya clonaste). `vendor/openshorts` es un submódulo del upstream: no editarlo.
+`faster-whisper` se conserva para la utilidad independiente `local_transcribe.py`; no es un fallback del pipeline. No se requieren credenciales de modelos.
 
-## Uso (siempre desde la raíz del proyecto)
+`vendor/openshorts` es un submódulo de solo lectura: se reutiliza únicamente el helper puro `snap_clip_to_words`, no sus selectores ni servicios. En un clon nuevo ejecutar `git submodule update --init`.
+
+## Comandos de la segunda etapa
+
+Desde la raíz, con medios y JSONs preparados y la carpeta destino existente; ejemplo para una sección local de 600 segundos:
 
 ```powershell
 $py = ".\.venv\Scripts\python.exe"
-
-# 1. Transcribir (una sola vez por video)
-& $py local_transcribe.py "downloads\VIDEO.mp4" "downloads\video_words.json"
-
-# 2. Elegir momentos (filtro normal: 3-5 clips; libre: 6-10)
-& $py openshorts_run.py --words "downloads\video_words.json" `
-    --out "output\mitad\shorts.json" --duration 1836
-
-# 3. Cortar y empaquetar
-& $py openshorts_cut.py --video "downloads\VIDEO.mp4" `
-    --words "downloads\video_words.json" `
-    --shorts "output\mitad\shorts.json" --out "output\mitad"
-
-# 4. Revisar qué dice cada clip
-& $py show_shorts.py "downloads\video_words.json" "output\mitad\shorts.json" 0
-# (el 3er arg es el offset en segundos si el video es un recorte del original)
+& $py dump_windows.py --words "downloads\SEC_words.json" --silences "downloads\SEC_silences.json" --section "0-600" --out "output\SEC\transcript.txt"
+& $py montage_from_picks.py --words "downloads\SEC_words.json" --silences "downloads\SEC_silences.json" --items "output\SEC\items.json" --picks "output\SEC\picks.json" --montages "output\SEC\montages.json"
+& $py openshorts_v2.py --video "downloads\SEC.mp4" --words "downloads\SEC_words.json" --section "00:00-10:00" --offset 0 --out "output\SEC" --phase montage
 ```
 
-## Notas
+No usar los límites del vivo en estos comandos. El cortador solo admite offset 0. No sobrescribir resultados existentes sin autorización.
 
-- Modelo de análisis: `gemini-3.1-flash-lite` (el `gemini-2.5-*` fue dado de baja; el
-  `3.6-flash` suele dar 503 por saturación).
-- Timestamps de `shorts.json` son relativos al video pasado en `--video`. Si es un
-  recorte, sumar el offset (ej. segunda mitad empieza en 2713s = 45:13 del original).
-- Subtítulos: el filtro `subtitles` de FFmpeg interpreta `MarginV` en unidades de la
-  resolución interna del ASS (288px), no en píxeles del video. Valores ≥350 los sacan
-  de pantalla sin error. Fix pendiente: `original_size=1080x1920` + `force_style` chico.
-- PiP de la webcam: recorte fijo `235x250+1670+8` del 1920x1080 (estable en este live;
-  verificar si cambia el layout).
-- Transcripts `*_words.json` son caché: no retranscribir salvo que cambie el video.
+## Verificación
+
+```powershell
+.\.venv\Scripts\python.exe -B -m unittest test_pipeline_contract -v
+```
+
+Incluye imports y ayuda sin SDK/credenciales, ausencia del selector anterior y una integración sintética real picks → montages → MP4/SRT con FFmpeg/FFprobe. No transcribe ni exporta Shotcut. No hay lint, typecheck ni CI configurados.

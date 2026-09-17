@@ -1,35 +1,32 @@
 # AGENTS.md — cliptrulo
 
-Pipeline local (sin Docker) que convierte lives largos en shorts 9:16: transcribe → elige momentos con Gemini → corta con FFmpeg.
+Pipeline local (sin Docker), dividido en dos skills: `cortar-shorts` prepara video/secciones → audio → Chamu → JSONs; `elegir-clips` recibe los JSONs y medios → selecciona momentos con el agente → corta crudos con FFmpeg → monta proyectos verticales editables en Shotcut. Exportación final solo por pedido explícito.
 
 ## Comandos (siempre desde la raíz)
 
 ```powershell
 $py = ".\.venv\Scripts\python.exe"
-& $py local_transcribe.py "downloads\VIDEO.mp4" "downloads\video_words.json"
-& $py openshorts_run.py --words "downloads\video_words.json" --out "output\mitad\shorts.json" --duration 1836
-& $py openshorts_cut.py --video "downloads\VIDEO.mp4" --words "downloads\video_words.json" --shorts "output\mitad\shorts.json" --out "output\mitad"
-& $py show_shorts.py "downloads\video_words.json" "output\mitad\shorts.json" 0
-& $py openshorts_v2.py --video "downloads\MITAD.mp4" --words "downloads\mitad_words.json" --section "MM:SS-MM:SS" --offset N --out "output\v2\seccion" --phase all
+& $py tools/ensure_chamu_cli.py
+& $py chamu_to_words.py "downloads\SEC_chamu.json" "downloads\SEC_words.json" --silences "downloads\SEC_silences.json"
+& $py dump_windows.py --words "downloads\SEC_words.json" --silences "downloads\SEC_silences.json" --section "0-600" --out "output\SEC\transcript.txt"
+& $py montage_from_picks.py --words "downloads\SEC_words.json" --silences "downloads\SEC_silences.json" --items "output\SEC\items.json" --picks "output\SEC\picks.json" --montages "output\SEC\montages.json"
+& $py openshorts_v2.py --video "downloads\SEC.mp4" --words "downloads\SEC_words.json" --section "00:00-10:00" --offset 0 --out "output\SEC" --phase montage
 ```
 
-- Setup: Python 3.12 + `.\.venv\Scripts\pip.exe install -r requirements.txt` (`faster-whisper`, `google-genai`, `python-dotenv`). FFmpeg se autodetecta en PATH o paquete WinGet de Gyan (`find_ffmpeg()` en `openshorts_common.py`, usado por cut/transcribe).
-- Orden obligatorio: transcribir (1 vez) → run (score → detail) → cut → show. `*_words.json` en `downloads/` es caché: no retranscribir salvo que cambie el video.
-- No hay tests, lint, typecheck ni CI. No hay `opencode.json`.
+- Setup: Python 3.12 + `.\.venv\Scripts\pip.exe install -r requirements.txt` (`faster-whisper` para la utilidad de transcripción local; el pipeline usa Chamu CLI). FFmpeg se autodetecta en PATH o paquete WinGet de Gyan (`find_ffmpeg()` en `openshorts_common.py`, usado por cut/transcribe).
+- Orden actual: `cortar-shorts` (preparar y transcribir una vez) → entrega `sections.json` + medios + JSONs → `elegir-clips` (seleccionar → validar picks → aprobar → cortar crudos → montar y revisar Shotcut). `*_words.json` es caché: no retranscribir salvo que cambie el medio/rango.
+- Tests de contrato e integración sintética: `.\.venv\Scripts\python.exe -B -m unittest test_pipeline_contract -v` (requieren FFmpeg/FFprobe; ejecución local sin APIs). No hay lint, typecheck ni CI configurados. `opencode.json` configura el entorno local.
 
 ## Reglas del pipeline
 
-- Selección de clips SIN Gemini: la hace el agente con el skill `elegir-clips` (mismos criterios: items contiguos + score; cada clip es un arco COMPLETO standalone — contexto + reacción + remate, 1-6 spans, sin tope 59s salvo 180s de Shorts; silencios/baches se saltean, cola ~2s tras la última palabra). `montage_from_picks.py` valida picks y arma `montages.json`; `openshorts_v2.py --phase montage` corta crudo. (`openshorts_run.py` v1 y las fases `segment`/`highlight` con Gemini quedan fuera del flujo.)
-- `openshorts_run.py` lee `GEMINI_API_KEY` parseando `.env` a mano (`:36-37`), no usa dotenv. No commitear `.env`.
-- `--duration` debe ser la duración real del video pasado en `--video`. Defaults: `--min-clips 3 --max-clips 5` (normal), `6-10` + `--shortlist-cap 14` (filtro libre). Clips siempre 15–59s; `cut` extiende a 15s mínimo (`openshorts_cut.py:68-69`).
-- Timestamps de `shorts.json` son relativos al `--video` dado. Si el video es un recorte, sumar offset manual (ej. segunda mitad offset 2713s). `show_shorts.py` acepta offset como 3er arg e imprime tiempo archivo vs absoluto.
-- `vendor/openshorts/` es submódulo del upstream (fijado a un commit) y solo lectura: reutilizar prompts, schemas, `build_transcript_windows` / `snap_clip_to_words` / `trim_to_best`. No editarlo, no seguir su `CLAUDE.md` (habla de Docker/FastAPI/React: no aplica aquí). Clon fresco: `git clone --recurse-submodules` o `git submodule update --init`.
+- La selección la hace únicamente el agente con `elegir-clips`: items contiguos + score, arco completo (contexto + reacción + remate), 1-6 spans por clip. `montage_from_picks.py` valida picks y arma `montages.json`; `openshorts_v2.py` solo corta crudos, con `--phase montage` como única fase y valor por defecto. No hay selector automático alternativo ni fallback.
+- El flujo usa `picks.json`/`montages.json`, mínimo 15s y máximo validado 180s. No necesita credenciales de modelos. No commitear `.env`.
+- `vendor/openshorts/` es submódulo del upstream (fijado a un commit) y solo lectura: reutilizar únicamente helpers puros como `snap_clip_to_words`; no invocar sus selectores, prompts ni servicios. No editarlo, no seguir su `CLAUDE.md` (habla de Docker/FastAPI/React: no aplica aquí). Clon fresco: `git clone --recurse-submodules` o `git submodule update --init`.
 - Formato standard de salida (fijado en `openshorts_common.py: STD_CODEC_ARGS/fps_args`): `1080x1920` mp4, H.264 yuv420p + faststart, AAC 48kHz 128k. FPS de origen si está en 23–60, si no se fuerza 30. Subtítulos en `.srt` al lado del mp4, nunca quemados.
 - `openshorts_v2.py` arma shorts por sección: `items.json` (agente, skill `elegir-clips`), `montages.json` (valida `montage_from_picks.py`), `clip_NN.mp4` crudo 16:9 + `clip_NN.srt` (`--phase montage`; el vertical va en Shotcut, ver abajo). Sin tope 59s: cada clip es un arco completo (tope blando 180s de Shorts).
 - Criterio de clips (skill `elegir-clips`): cada clip es un arco COMPLETO standalone — contexto + reacción + remate, 1-6 spans con los momentos que dicen algo (silencios/baches se saltean, el montaje los elimina); si lee comentarios, incluir el necesario para entender la respuesta; cola ~2s tras la última palabra (o outro mínima en Shotcut). Cortes en mitad de silencio, última palabra siempre entera (hasta la siguiente si cae en borde: el `.srt` incluye palabras con `start <= fin`; corte de split con `"hard": true` = fin exacto sin cola). Acortamiento a <60s (standard redes) es estructural: 2+ payoffs → split por payoff, browsing entre reels se descarta; si una parte sigue larga, recortar relleno interno, nunca presentación ni remate. Sin tope 59s salvo 180s de Shorts.
-- La `--section` va en tiempo del vivo y `--offset` la convierte a tiempo de archivo.
+- En el flujo actual cada MP4/JSON de sección empieza en 0: usar `--section "00:00-duración" --offset 0`. `sections.json` conserva el mapeo al vivo. El único offset admitido por el cortador es 0; normalizar primero cualquier fuente que aún use tiempos del vivo.
 - Si el streamer oculta la webcam en un tramo (PiP sale negro), ese clip se monta con `--no-cam` (verificar presencia de la cámara en frames del rango del clip, no asumir).
-- Si Gemini bloquea una sección con `PROHIBITED_CONTENT`, partirla en 2 sub-secciones y segmentar cada una por separado (el bloqueo suele dispararlo el payload combinado, no un tramo puntual); reintentar idéntico no sirve.
 
 ## Gotchas FFmpeg (verificados)
 
@@ -40,7 +37,7 @@ $py = ".\.venv\Scripts\python.exe"
 - `to_srt()` agrupa palabras en líneas de ~42 chars o 2.5s (`openshorts_cut.py:33-49`). Transcripción local: `faster-whisper` modelo `base`, `language="es"`, `word_timestamps=True`, CPU int8 (`local_transcribe.py:43-46`).
 
 ## Shotcut MCP (segunda fase: vertical + PiP)
-- El primer pipeline termina en crudo 16:9 + `.srt`. El vertical se arma en Shotcut: proyecto `1080x1920` 30fps, V1 = crop ventana + `affine`, V2 = crop caja cámara + `affine` a `260x292` en `(800,20)`, compositing por defecto (qtblend V1↔V2 ya cableado).
+- El skill `cortar-shorts` termina en medios + JSONs. Dentro de `elegir-clips`, el corte produce crudo 16:9 + `.srt` y luego el vertical se arma en Shotcut: proyecto `1080x1920` 30fps, V1 = crop ventana + `affine`, V2 = crop caja cámara + `affine` a `260x292` en `(800,20)`, compositing por defecto (qtblend V1↔V2 ya cableado).
 - Receta `affine` que funciona: props `rect` + `transition.rect` EN SYNC (`"x y w h"`) + `transition.fill=1` + `transition.distort=0` (el filtro lee `rect`; Shotcut lo agrega al abrir: si difieren gana el viejo. El rect de 5 tokens con `100%` rompe el filtro). `crop` va en PÍXELES del fuente, no fracciones.
 - Posición STANDARD EP2 = reacción a video en pantalla completa + cámara normal (layout fijo; recalcular por video si cambia): V1 crop a mano `left=386 top=87 right=386 bottom=99` + affine `0 0 1080 1920` con `distort=1` (llena todo el 9:16 aunque estire ~2.3x vertical); V2-cam crop `left=1632 top=48 right=51 bottom=687` (título CHITRULO + caja al borde cyan, sin gris) + affine `760 20 300 437` con `distort=0` (PiP arriba-derecha).
 - Escenas con layout distinto (ver `detect_scenes.py`, clase REEL/GRID/FULL a 1fps + `scenes.json`): V1 se parte por escena, cada parte con su crop + affine. Clip_01 EP2: GRID (perfil/grilla) crop central 9:16 `left=656 top=0 right=656 bottom=0` (608x1080) + affine `0 0 1080 1920` con `distort=0` ( upscale 1.78x SIN deformar, como mirar un reel); REEL (modal video+comentarios) crop `left=515 top=60 right=890 bottom=70` (solo panel de video, sin sidebar) + affine full-bleed `distort=1` (estira ~4%, imperceptible); FULL (video centrado con bandas grises) = mismo esquema que GRID (crop central 9:16 + `distort=0`; el standard viejo con `distort=1` deforma ~2.3x y queda obsoleto). Caso especial clip_05 (página de error angosta): crop a la columna `left=685 top=51 right=687 bottom=220` (saca footer) + `distort=0` (bandas negras invisibles sobre fondo negro). V2-cam = standard. REGLA: nunca `distort=1` sobre crops no-9:16 (deforma); si el crop no es 9:16 exacto se centra con `distort=0`. Título CHITRULO sale en el PiP (debajo de y=48): es parte de la receta standard, se deja.
