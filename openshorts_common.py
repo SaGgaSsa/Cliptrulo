@@ -23,9 +23,12 @@ FPROBE = str(Path(FF).with_name("ffprobe.exe")) if Path(FF).name == "ffmpeg.exe"
 # Formato standard de salida (todos los clips):
 # 1080x1920 mp4, H.264 yuv420p + faststart, AAC 48kHz 128k.
 # FPS: se conserva el de origen si está en [23, 60], si no se fuerza 30.
-# Duración: 15s mínimo, 59s máximo. Subtítulos: .srt al lado, NUNCA quemados.
+# Duración: montaje 15s mínimo, Shorts 180s máximo. Subtítulos: .srt al lado, NUNCA quemados.
+# Crudo continuo (sin edición interna): 60s mínimo, 180s máximo.
 MIN_CLIP_S = 15.0
 MAX_CLIP_S = 59.0
+CRUDO_MIN_S = 60.0
+CRUDO_MAX_S = 180.0
 MIN_KEEP_FPS = 23.0
 MAX_KEEP_FPS = 60.0
 FORCE_FPS = 30.0

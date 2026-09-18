@@ -155,6 +155,112 @@ class PipelineContractTests(unittest.TestCase):
             self.assertGreaterEqual(duration, 15)
             self.assertLessEqual(duration, 17)
 
+    def test_real_crudo_synthetic(self):
+        from openshorts_common import FF, FPROBE
+
+        probe = shutil.which(FPROBE)
+        if probe is None:
+            candidate = Path(FF).with_name('ffprobe.exe')
+            self.assertTrue(candidate.is_file(), f'FFprobe unavailable: {FPROBE}, {candidate}')
+            probe = str(candidate)
+
+        def run_media(command):
+            try:
+                result = subprocess.run(
+                    command, capture_output=True, text=True, timeout=180,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                self.fail(f'Media command failed: {command!r}: {error}')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            return result
+
+        with tempfile.TemporaryDirectory(
+            dir=r'C:\Users\saggassa\AppData\Local\Temp\opencode'
+        ) as directory:
+            base = Path(directory)
+            video = base / 'synthetic_crudo.mp4'
+            words = base / 'words.json'
+            out = base / 'output'
+            out.mkdir()
+            run_media([
+                FF, '-nostdin', '-v', 'error',
+                '-f', 'lavfi', '-i', 'color=c=blue:s=160x90:r=24',
+                '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+                '-t', '65', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac', '-threads', '1', str(video),
+            ])
+            words.write_text(json.dumps([
+                {'word': 'inicio', 'start': 0.5, 'end': 1.0},
+                {'word': 'medio', 'start': 30, 'end': 31},
+                {'word': 'final', 'start': 60, 'end': 61},
+            ]), encoding='utf-8')
+            items = base / 'items.json'
+            picks = base / 'picks.json'
+            silences = base / 'silences.json'
+            clips = out / 'clips.json'
+            item = {
+                'start': 0, 'end': 65, 'kind': 'reaccion',
+                'score': 80, 'summary': 'Prueba crudo continuo',
+            }
+            items.write_text(json.dumps({'sec_a': 0, 'sec_b': 65, 'items': [item]}), encoding='utf-8')
+            picks.write_text(json.dumps({
+                'clips': [{
+                    'rank': 1, 'start': 0, 'end': 62,
+                    'score': 80, 'hook': 'inicio',
+                    'summary': 'Tramo continuo unico',
+                }],
+            }), encoding='utf-8')
+            silences.write_text(json.dumps([
+                {'start': 0, 'end': 0.5},
+                {'start': 61, 'end': 65},
+            ]), encoding='utf-8')
+            picks_argv = [
+                'crudo_from_picks.py', '--words', str(words),
+                '--items', str(items), '--picks', str(picks),
+                '--silences', str(silences), '--clips', str(clips),
+            ]
+            validated = self.run_isolated(
+                f'\nimport runpy\nsys.argv = {picks_argv!r}\n'
+                'runpy.run_path("crudo_from_picks.py", run_name="__main__")\n'
+            )
+            self.assertTrue(clips.is_file(), validated.stdout + validated.stderr)
+            clip_list = json.loads(clips.read_text(encoding='utf-8'))['clips']
+            self.assertEqual(len(clip_list), 1)
+            self.assertEqual(clip_list[0]['rank'], 1)
+            total = clip_list[0]['total']
+            self.assertGreaterEqual(total, 60)
+            self.assertLessEqual(total, 65)
+            argv = [
+                'openshorts_v2.py', '--video', str(video), '--words', str(words),
+                '--section', '00:00-01:05', '--offset', '0', '--out', str(out),
+                '--phase', 'crudo',
+            ]
+            result = self.run_isolated(
+                f'\nimport runpy\nsys.argv = {argv!r}\n'
+                'runpy.run_path("openshorts_v2.py", run_name="__main__")\n',
+                timeout=180,
+            )
+            diagnostics = result.stdout + result.stderr
+            self.assertNotIn('CRUD0-FAIL', diagnostics, diagnostics)
+            mp4 = out / 'clip_01.mp4'
+            srt = out / 'clip_01.srt'
+            for artifact in (mp4, srt):
+                self.assertTrue(artifact.is_file(), diagnostics)
+                self.assertGreater(artifact.stat().st_size, 0, diagnostics)
+            self.assertIn('medio', srt.read_text(encoding='utf-8'))
+            metadata = json.loads(run_media([
+                probe, '-v', 'error', '-show_streams', '-show_format',
+                '-of', 'json', str(mp4),
+            ]).stdout)
+            videos = [s for s in metadata['streams'] if s['codec_type'] == 'video']
+            audios = [s for s in metadata['streams'] if s['codec_type'] == 'audio']
+            self.assertEqual(len(videos), 1, metadata)
+            self.assertEqual(len(audios), 1, metadata)
+            self.assertEqual(videos[0]['codec_name'], 'h264')
+            self.assertEqual(audios[0]['codec_name'], 'aac')
+            duration = float(metadata['format']['duration'])
+            self.assertAlmostEqual(duration, total, delta=0.5)
+
     def test_only_montage_phase_is_available(self):
         import openshorts_common
         import openshorts_v2
@@ -169,16 +275,16 @@ class PipelineContractTests(unittest.TestCase):
             '\nimport runpy\nsys.argv = ["openshorts_v2.py", "--help"]\n'
             'runpy.run_path("openshorts_v2.py", run_name="__main__")\n'
         )
-        self.assertIn('--phase {montage}', result.stdout)
+        self.assertIn('--phase {montage,crudo}', result.stdout)
         self.assertNotIn('--clips', result.stdout)
 
     def test_montage_imports_without_sdk_or_credentials(self):
         self.run_isolated(
-            '\nimport openshorts_common\nimport montage_from_picks\nimport openshorts_v2\n'
+            '\nimport openshorts_common\nimport montage_from_picks\nimport crudo_from_picks\nimport openshorts_v2\n'
         )
 
     def test_montage_scripts_help_without_sdk_or_credentials(self):
-        for script in ('montage_from_picks.py', 'openshorts_v2.py'):
+        for script in ('montage_from_picks.py', 'crudo_from_picks.py', 'openshorts_v2.py'):
             with self.subTest(script=script):
                 result = self.run_isolated(
                     f'\nimport runpy\nsys.argv = [{script!r}, "--help"]\n'
